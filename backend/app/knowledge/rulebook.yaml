@@ -1,0 +1,768 @@
+# The rulebook: what the current documents actually say, encoded as data.
+#
+# Authored, not extracted at runtime. Every entry carries the document and
+# section it came from, and that provenance becomes the Citation on every
+# Decision -- so an answer can always show its source, and a reviewer can check
+# the encoding against the PDF.
+#
+# INVARIANT, enforced by loader.py: no order, ticket or account ID may appear in
+# a `when:` block. Account scoping belongs in `applies_to.accounts` only, exactly
+# mirroring how the source documents scope themselves. This is what separates a
+# rulebook from a pile of hardcoded answers: a reviewer can add a fictional
+# fifth account with novel contract terms by editing this file alone.
+#
+# `replaces:` appears three times, and every use is backed by explicit language:
+#
+#   sla.northstar.p1        the agreement says the targets "replace" the
+#                           standard support-policy targets -- verbatim
+#   credit.lumenworks.fixed "This clause replaces the default failed-pickup
+#                           credit amount and timing threshold" -- verbatim
+#   cancel.northstar.waiver the agreement does not use the word; the SOP itself
+#                           carves out the exception ("unless a customer
+#                           agreement explicitly waives the cancellation fee")
+#
+# Precedence alone is not sufficient -- see credit.lumenworks.fixed for the case
+# where it silently produces a plausible wrong number.
+
+version: 1
+
+# =====================================================================
+# CANCELLATION
+# =====================================================================
+
+rules:
+  - id: cancel.sop_v4.draft
+    domain: cancellation
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      order_status: {eq: DRAFT}
+    then:
+      outcome: allowed
+      fee_inr: 0
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "1. Order cancellation"
+      quote: "DRAFT: May be cancelled with no fee."
+
+  - id: cancel.sop_v4.booked_within_grace
+    domain: cancellation
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      order_status: {eq: BOOKED}
+      minutes_since_booking: {lte: 30}
+    then:
+      outcome: allowed
+      fee_inr: 0
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "1. Order cancellation"
+      quote: "BOOKED, not yet PICKED_UP: May be cancelled. No fee within 30 minutes of booking."
+
+  - id: cancel.sop_v4.booked_after_grace
+    domain: cancellation
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      order_status: {eq: BOOKED}
+      minutes_since_booking: {gt: 30}
+    then:
+      outcome: allowed
+      fee_inr: 250
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "1. Order cancellation"
+      quote: >-
+        After 30 minutes, charge INR 250 unless a customer agreement explicitly
+        waives the cancellation fee.
+
+  - id: cancel.sop_v4.picked_up
+    domain: cancellation
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      order_status: {eq: PICKED_UP}
+    then:
+      outcome: denied
+      next_step: return_to_origin
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "1. Order cancellation"
+      quote: >-
+        PICKED_UP: Do not cancel. Use the return-to-origin workflow if the
+        customer wants the parcel returned.
+
+  - id: cancel.sop_v4.delivered
+    domain: cancellation
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      order_status: {eq: DELIVERED}
+    then:
+      outcome: denied
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "1. Order cancellation"
+      quote: "DELIVERED: Cannot be cancelled."
+
+  # Note the deliberate absence of any time condition. That IS the clause, and
+  # it is what defeats the headline trap: the SOP retrieves far more strongly on
+  # "cancellation fee" than this one sentence in a different document.
+  #
+  # On `replaces`: the agreement does not itself use the word. The authorisation
+  # is in the lower-tier document -- SOP v4 section 1 charges the fee "unless a
+  # customer agreement explicitly waives the cancellation fee". Precedence alone
+  # would also produce the right answer here; the declaration makes the
+  # supersession explicit rather than an accident of sort order.
+  #
+  # cancel.sop_v4.picked_up is deliberately NOT replaced. The agreement's second
+  # sentence defers to the standard return-to-origin process, so the SOP rule
+  # must survive and decide that case.
+  - id: cancel.northstar.waiver
+    domain: cancellation
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    applies_to: {accounts: [ACCT-001]}
+    when:
+      order_status: {eq: BOOKED}
+    then:
+      outcome: allowed
+      fee_inr: 0
+    replaces:
+      - cancel.sop_v4.booked_within_grace
+      - cancel.sop_v4.booked_after_grace
+    source:
+      doc: 05_Northstar_Logistics_Enterprise_Agreement
+      section: "2. Shipment cancellation"
+      quote: >-
+        Northstar may cancel any BOOKED shipment before pickup with no
+        cancellation fee, regardless of how long ago the shipment was booked.
+
+  # LumenWorks section 2 gets no rule. It explicitly declines to waive and defers
+  # to the SOP, which already applies by default; a "defer" rule would add engine
+  # complexity for no behavioural difference. The clause still reaches the user
+  # through retrieval, which is a better answer than silence.
+
+# =====================================================================
+# SERVICE CREDIT
+# =====================================================================
+
+  - id: credit.sop_v4.default
+    domain: service_credit
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      hours_past_window_end: {gt: 2}
+      carrier_fault: {eq: true}
+      customer_fault: {eq: false}
+    then:
+      outcome: eligible
+      amount:
+        kind: lesser_of
+        fixed_inr: 500
+        percent_of: {field: shipment_fee_inr, percent: 10}
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "2. Failed-pickup service credits"
+      quote: >-
+        Under the default policy, a customer is eligible for a service credit
+        when the pickup is more than 2 hours past the end of the scheduled
+        pickup window, the carrier is at fault, and there is no customer-caused
+        issue. The default credit is the lower of INR 500 or 10% of the
+        shipment fee.
+
+  - id: credit.sop_v4.customer_fault
+    domain: service_credit
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    when:
+      customer_fault: {eq: true}
+    then:
+      outcome: ineligible
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "2. Failed-pickup service credits"
+      quote: "... and there is no customer-caused issue."
+
+  # THE most important rule in the file, and the reason `replaces` exists.
+  #
+  # Without it, a LumenWorks pickup 3 hours late falls through to the SOP
+  # default -- 3h > 2h, carrier at fault -- and returns an eligible INR 240 that
+  # looks entirely reasonable and is wrong. The agreement moved the threshold to
+  # 4 hours as well as fixing the amount, and a rule is an atomic unit: you take
+  # eligibility and amount from the same tier or you get the right number by
+  # luck and the wrong one on the next case.
+  #
+  # credit.sop_v4.customer_fault is NOT replaced: the clause replaces "the
+  # default failed-pickup credit amount and timing threshold", and a
+  # customer-fault exclusion is neither. LumenWorks section 3 requires the
+  # customer not be at fault in any case.
+  - id: credit.lumenworks.fixed
+    domain: service_credit
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-03-01
+    effective_to: 2027-02-28
+    applies_to: {accounts: [ACCT-002]}
+    when:
+      hours_past_window_end: {gt: 4}
+      carrier_fault: {eq: true}
+      customer_fault: {eq: false}
+    then:
+      outcome: eligible
+      amount: {kind: fixed, fixed_inr: 300}
+    replaces:
+      - credit.sop_v4.default
+    source:
+      doc: 06_LumenWorks_Service_Agreement
+      section: "3. Failed-pickup credits"
+      quote: >-
+        If a pickup is more than 4 hours past the end of the scheduled pickup
+        window, the carrier is at fault, and the customer is not at fault,
+        LumenWorks receives a fixed INR 300 service credit. This clause replaces
+        the default failed-pickup credit amount and timing threshold in the SOP.
+
+# =====================================================================
+# SLA -- first-response targets
+# =====================================================================
+#
+# Coverage is per-rule, never global. Only Enterprise P1 is marked 24x7 in
+# Policy v3; only Northstar P1 is marked 24x7 in its agreement. Everything else
+# follows the business calendar.
+#
+# The unqualified durations ("2 hours", "1 hour") are read as business hours --
+# D-02. The same table marks P1 as "24x7" and P3 as "1 business day" explicitly,
+# so a drafter who was specific about round-the-clock coverage in one cell and
+# business days in another was drawing a distinction. Reading the unqualified
+# cell as wall-clock would make P2 stricter than P1 on a weekend, which is
+# incoherent. Affects no ticket in this pack; would matter on new data.
+
+  - id: sla.v3.enterprise.p1
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Enterprise}, severity: {eq: P1}}
+    then: {minutes: 30, coverage: "24x7"}
+    source: &policy_v3_targets
+      doc: 01_Support_Policy_v3_CURRENT
+      section: "3. Default first-response targets"
+      quote: >-
+        Plan P1 P2 P3 / Enterprise 30 minutes, 24x7 | 2 hours | 1 business day /
+        Growth 2 business hours | 4 business hours | 2 business days / Standard
+        4 business hours | 1 business day | 2 business days
+
+  - id: sla.v3.enterprise.p2
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Enterprise}, severity: {eq: P2}}
+    then: {minutes: 120, coverage: business}
+    source: *policy_v3_targets
+
+  - id: sla.v3.enterprise.p3
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Enterprise}, severity: {eq: P3}}
+    then: {minutes: 540, coverage: business}   # 1 business day = 9 business hours
+    source: *policy_v3_targets
+
+  - id: sla.v3.growth.p1
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Growth}, severity: {eq: P1}}
+    then: {minutes: 120, coverage: business}
+    source: *policy_v3_targets
+
+  - id: sla.v3.growth.p2
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Growth}, severity: {eq: P2}}
+    then: {minutes: 240, coverage: business}
+    source: *policy_v3_targets
+
+  - id: sla.v3.growth.p3
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Growth}, severity: {eq: P3}}
+    then: {minutes: 1080, coverage: business}  # 2 business days
+    source: *policy_v3_targets
+
+  - id: sla.v3.standard.p1
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Standard}, severity: {eq: P1}}
+    then: {minutes: 240, coverage: business}
+    source: *policy_v3_targets
+
+  - id: sla.v3.standard.p2
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Standard}, severity: {eq: P2}}
+    then: {minutes: 540, coverage: business}   # 1 business day
+    source: *policy_v3_targets
+
+  - id: sla.v3.standard.p3
+    domain: sla
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-05-01
+    applies_to: {accounts: "*"}
+    when: {plan: {eq: Standard}, severity: {eq: P3}}
+    then: {minutes: 1080, coverage: business}  # 2 business days
+    source: *policy_v3_targets
+
+  # "replace" is verbatim in the agreement header, and it replaces the standard
+  # targets as a set -- hence all three Enterprise rules.
+  - id: sla.northstar.p1
+    domain: sla
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    applies_to: {accounts: [ACCT-001]}
+    when: {severity: {eq: P1}}
+    then: {minutes: 15, coverage: "24x7"}
+    replaces: [sla.v3.enterprise.p1, sla.v3.enterprise.p2, sla.v3.enterprise.p3]
+    source: &northstar_sla
+      doc: 05_Northstar_Logistics_Enterprise_Agreement
+      section: "1. Support terms"
+      quote: >-
+        For Northstar Logistics, the following first-response targets replace
+        ParcelPilot's standard support-policy targets: P1: 15 minutes, 24x7 /
+        P2: 1 hour / P3: 8 business hours
+
+  - id: sla.northstar.p2
+    domain: sla
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    applies_to: {accounts: [ACCT-001]}
+    when: {severity: {eq: P2}}
+    then: {minutes: 60, coverage: business}
+    source: *northstar_sla
+
+  - id: sla.northstar.p3
+    domain: sla
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    applies_to: {accounts: [ACCT-001]}
+    when: {severity: {eq: P3}}
+    then: {minutes: 480, coverage: business}   # 8 business hours
+    source: *northstar_sla
+
+  # No `replaces` here, deliberately. LumenWorks section 1 contains no
+  # replacement language, and needs none: its targets are numerically identical
+  # to the Policy v3 Growth defaults, which are already business-coverage. They
+  # stay as tier-1 rules because they ARE contract terms and should be cited as
+  # such -- and the Growth defaults then surface as `outranked` overrides, which
+  # honestly reports that two sources agree rather than hiding it.
+  #
+  # "No weekend or after-hours support coverage" needs no special case: it is
+  # coverage: business, and the calendar already excludes weekends. The
+  # consequence is worth showing in a demo -- even a LumenWorks P1 raised on a
+  # Sunday does not start until Monday 09:00.
+  - id: sla.lumenworks.p1
+    domain: sla
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-03-01
+    effective_to: 2027-02-28
+    applies_to: {accounts: [ACCT-002]}
+    when: {severity: {eq: P1}}
+    then: {minutes: 120, coverage: business}
+    source: &lumenworks_sla
+      doc: 06_LumenWorks_Service_Agreement
+      section: "1. Support terms"
+      quote: >-
+        P1: 2 business hours / P2: 4 business hours / P3: 2 business days /
+        No weekend or after-hours support coverage.
+
+  - id: sla.lumenworks.p2
+    domain: sla
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-03-01
+    effective_to: 2027-02-28
+    applies_to: {accounts: [ACCT-002]}
+    when: {severity: {eq: P2}}
+    then: {minutes: 240, coverage: business}
+    source: *lumenworks_sla
+
+  - id: sla.lumenworks.p3
+    domain: sla
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-03-01
+    effective_to: 2027-02-28
+    applies_to: {accounts: [ACCT-002]}
+    when: {severity: {eq: P3}}
+    then: {minutes: 1080, coverage: business}
+    source: *lumenworks_sla
+
+# =====================================================================
+# CONSTRAINTS -- checked after an amount is determined, not eligibility rules
+# =====================================================================
+
+constraints:
+  - id: approval.sop_v4.manager_required
+    domain: service_credit
+    kind: approval_threshold
+    authority_tier: 2
+    status: CURRENT
+    effective_from: 2026-06-15
+    applies_to: {accounts: "*"}
+    amount_inr: 1000          # strictly above; "above INR 1,000"
+    human_reason: "Manager approval required for any individual credit above INR 1,000 (SOP v4 section 3)."
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "3. Approval and uncertainty"
+      quote: "Any individual credit above INR 1,000 requires manager approval."
+
+  # Surfaced as a note, never deducted: the pack contains no credit ledger, so
+  # there is no history to aggregate against (assumption A9). Claiming a
+  # remaining balance we cannot compute would be exactly the confident-but-wrong
+  # answer this system exists to avoid.
+  - id: credit.northstar.monthly_cap
+    domain: service_credit
+    kind: monthly_aggregate_cap
+    authority_tier: 1
+    status: ACTIVE
+    effective_from: 2026-01-01
+    effective_to: 2026-12-31
+    applies_to: {accounts: [ACCT-001]}
+    amount_inr: 5000
+    note: "Monthly aggregate service credits for this account are capped at INR 5,000. No credit ledger exists in the supplied data, so this is reported as a constraint on the account rather than checked against a running total."
+    source:
+      doc: 05_Northstar_Logistics_Enterprise_Agreement
+      section: "3. Service credits"
+      quote: >-
+        Monthly aggregate service credits are capped at INR 5,000. Unless this
+        agreement states otherwise, the current ParcelPilot service-credit SOP
+        applies.
+
+# =====================================================================
+# SEVERITY CLASSIFICATION -- Policy v3 section 2
+# =====================================================================
+#
+# Severity drives the SLA target, which drives breach detection, which drives
+# escalation. Putting a model judgement at the root of that chain reintroduces
+# exactly the non-determinism the engine exists to remove, so this stays
+# rule-based (D-12).
+#
+# It is also the weakest link in the design, and openly so: phrase matching is
+# brittle on unseen tickets. The mitigation is the escape hatch -- no match
+# returns `indeterminate` and asks a human rather than guessing. The concrete
+# fix, noted in the product note, is model-proposed severity validated against
+# these rules with human confirmation on disagreement.
+#
+# Rules are evaluated in order; first match wins. Matching is case-insensitive
+# over subject + description.
+
+severity_rules:
+  - id: severity.p1.credential_exposure
+    level: P1
+    any_phrase: ["api key", "credential", "key exposure", "secret key",
+                 "access token", "security incident", "data breach", "leaked"]
+    source: &policy_v3_severity
+      doc: 01_Support_Policy_v3_CURRENT
+      section: "2. Severity definitions"
+      quote: >-
+        P1 - Critical: Complete production outage preventing all shipment
+        creation for a customer, confirmed security incident or suspected
+        credential exposure, or another event causing immediate material
+        business risk with no workaround.
+
+  # Both lists must hit: a scope signal AND a failure signal. "Bulk upload
+  # fails" is a failure without the scope, and correctly falls through to P2.
+  - id: severity.p1.complete_outage
+    level: P1
+    all_of:
+      - any_phrase: ["all shipment", "every user", "all users", "complete outage",
+                     "entire account", "nobody can", "no one can"]
+      - any_phrase: ["failing", "fails", "http 500", "cannot create",
+                     "unable to create", "is down", "outage"]
+    source: *policy_v3_severity
+
+  - id: severity.p2.degraded
+    level: P2
+    any_phrase: ["fails", "failing", "failure", "unavailable", "degraded",
+                 "not working", "broken", "timeout", "times out", "error"]
+    source:
+      doc: 01_Support_Policy_v3_CURRENT
+      section: "2. Severity definitions"
+      quote: >-
+        P2 - High: Major feature unavailable or materially degraded for a
+        customer, but core operations remain possible or a workaround exists.
+
+  - id: severity.p3.how_to
+    level: P3
+    any_phrase: ["how do", "how to", "how can", "where do", "where can",
+                 "change the", "update the", "replace the", "configure",
+                 "asked whether", "wants to", "?"]
+    source: &policy_v3_p3
+      doc: 01_Support_Policy_v3_CURRENT
+      section: "2. Severity definitions"
+      quote: >-
+        P3 - Normal: Minor defect, how-to question, configuration request, or
+        issue with limited operational impact.
+
+  - id: severity.p3.minor_defect
+    level: P3
+    any_phrase: ["still shows", "shows booked", "display", "incorrect status",
+                 "status lag", "delayed update", "minor"]
+    source: *policy_v3_p3
+
+# =====================================================================
+# PRODUCT CAPABILITY FACTS -- tier 3
+# =====================================================================
+
+product_facts:
+  - id: product.bulk_upload.available
+    topic: bulk_upload
+    when: {plan: {in: [Growth, Enterprise]}}
+    then: {available: true, max_rows: 5000}
+    authority_tier: 3
+    source: &product_capabilities
+      doc: 04_Product_Operations_Guide_and_Known_Issues
+      section: "1. Plan capabilities"
+      quote: >-
+        Bulk Upload: Available on Growth and Enterprise. Supported file size is
+        up to 5,000 rows per CSV. Standard: Bulk Upload is not included.
+
+  - id: product.bulk_upload.unavailable
+    topic: bulk_upload
+    when: {plan: {eq: Standard}}
+    then: {available: false}
+    authority_tier: 3
+    source: *product_capabilities
+
+# =====================================================================
+# KNOWN ISSUES -- tier 3, post-decision annotations rather than rules
+# =====================================================================
+#
+# Two registers per caveat. Customers get the behaviour ("SwiftShip pickup
+# confirmations can lag up to 20 minutes"); internal users get the tracker
+# reference and status as well. Same caveat, different audience -- a customer
+# has no use for an internal issue ID and its investigation state.
+
+known_issues:
+  - id: KI-208
+    title: Bulk Upload failures on large CSVs
+    opened: 2026-08-10
+    issue_status: Investigating
+    authority_tier: 3
+    when:
+      topic: {eq: bulk_upload}
+      rows: {gt: 3000}
+      plan: {in: [Growth, Enterprise]}
+    caveat: >-
+      KI-208 (Investigating): bulk uploads above roughly 3,000 rows fail
+      intermittently on Growth and Enterprise, even though the supported product
+      limit remains 5,000 rows. This is a known defect, not a plan limit.
+      Workaround: split the upload into files below 3,000 rows. Individual
+      shipment creation is unaffected.
+    customer_caveat: >-
+      There is a known defect affecting CSV uploads above roughly 3,000 rows.
+      The supported limit for your plan is still 5,000 rows -- this is a bug we
+      are investigating, not a restriction on your account. Splitting the file
+      into batches below 3,000 rows works in the meantime, and creating
+      shipments individually is unaffected.
+    source:
+      doc: 04_Product_Operations_Guide_and_Known_Issues
+      section: "2. Current known issues / KI-208"
+      quote: >-
+        Some Growth and Enterprise customers experience intermittent failures on
+        CSV uploads above approximately 3,000 rows, even though the supported
+        product limit remains 5,000 rows. Workaround: split the upload into
+        files below 3,000 rows. Individual shipment creation is unaffected.
+
+  # Inverts the obvious answer. Status BOOKED normally means no pickup has been
+  # confirmed -- but on SwiftShip it may simply mean the webhook has not landed
+  # yet, and telling a customer their parcel was not collected when it is
+  # already on a van is a real operational mistake. Attaches to any SwiftShip
+  # order still showing BOOKED, which includes ORD-1001, so the cancellation
+  # answer carries it too: cancelling a parcel that has physically been
+  # collected is worse than a wrong fee.
+  - id: KI-211
+    title: SwiftShip pickup webhook delay
+    opened: 2026-08-12
+    issue_status: Monitoring
+    authority_tier: 3
+    when:
+      carrier: {eq: SwiftShip}
+      order_status: {eq: BOOKED}
+    caveat: >-
+      KI-211 (Monitoring): SwiftShip pickup confirmation webhooks can arrive up
+      to 20 minutes late, so a parcel may already have been collected while
+      ParcelPilot still shows BOOKED. Verify carrier status or wait through the
+      delay window before acting on the BOOKED status.
+    customer_caveat: >-
+      Pickup confirmations from this carrier can take up to 20 minutes to reach
+      us, so the parcel may already have been collected even though the status
+      still shows BOOKED. Worth confirming with the driver before we treat it as
+      not collected.
+    source:
+      doc: 04_Product_Operations_Guide_and_Known_Issues
+      section: "2. Current known issues / KI-211"
+      quote: >-
+        SwiftShip pickup confirmation webhooks can arrive up to 20 minutes late.
+        A parcel may physically be collected while ParcelPilot still shows
+        BOOKED. Before telling a customer that a pickup did not occur, verify
+        the carrier status or wait through the known delay window.
+
+  # Loaded so the system knows it exists and can say it was considered, but it
+  # never matches: the guide warns explicitly against reaching for a resolved
+  # issue to explain a new incident, and a plausible-sounding stale explanation
+  # is worse than none.
+  - id: KI-176
+    title: Address validation
+    resolved: 2026-07-18
+    issue_status: Resolved
+    authority_tier: 3
+    excluded_from_matching: true
+    caveat: "Resolved 2026-07-18. Not used to explain new incidents."
+    customer_caveat: "Resolved 2026-07-18."
+    source:
+      doc: 04_Product_Operations_Guide_and_Known_Issues
+      section: "3. Resolved issue"
+      quote: >-
+        KI-176 - Address validation: Resolved 18 July 2026. Do not use this
+        resolved issue to explain new incidents unless evidence specifically
+        matches it.
+
+# =====================================================================
+# CONTRADICTION CHECKS -- tier-4 history vs the winning rule
+# =====================================================================
+#
+# Historical resolutions are context, never authority. The right behaviour is
+# not to ignore a wrong one but to say a previous answer was incorrect, so a
+# human reading the same history does not repeat it.
+#
+# Matched on the winning rule's OUTPUT rather than on ticket IDs, so the check
+# generalises: any account whose agreement waives the fee will catch any
+# recorded resolution claiming a fee was charged.
+
+contradiction_checks:
+  - id: contradiction.fee_claimed_where_waived
+    domain: cancellation
+    when_decision:
+      fee_inr: {eq: 0}
+    resolution_matches_any: ["cancellation fee applied", "fee applied", "inr 250 cancellation"]
+    why_wrong: >-
+      The rule that governs this account waives the cancellation fee, so the
+      fee stated in that ticket did not apply. The resolution was incorrect when
+      it was given.
+
+  - id: contradiction.plan_limit_confused_with_bug_threshold
+    domain: product
+    topic: bulk_upload
+    resolution_matches_any: ["only supports 3,000 rows", "only supports 3000 rows",
+                             "plan only supports 3,000", "limit is 3,000"]
+    why_wrong: >-
+      The supported limit on Growth and Enterprise is 5,000 rows per the current
+      Product Operations Guide. Roughly 3,000 rows is the threshold of known
+      defect KI-208, not a plan limit. The resolution mistook a bug for a
+      product restriction.
+
+# =====================================================================
+# ESCALATION TRIGGERS
+# =====================================================================
+#
+# Code, not model judgement. Each carries its source where one exists; triggers
+# that come from a product decision rather than a document say so, so the
+# distinction stays visible rather than being laundered into policy.
+
+escalation:
+  - id: escalate.p1_immediate
+    when: {severity: {eq: P1}}
+    reason: "P1 incidents are escalated immediately."
+    source: &policy_v3_escalation
+      doc: 01_Support_Policy_v3_CURRENT
+      section: "4. Escalation"
+      quote: >-
+        P1 incidents should be escalated immediately. If a response target is
+        already breached, the agent should clearly state the breach and
+        recommend escalation rather than hiding uncertainty.
+
+  - id: escalate.sla_breached
+    when: {sla_outcome: {eq: breached}}
+    reason: "The first-response target is already breached; the breach is stated plainly and escalation recommended."
+    source: *policy_v3_escalation
+
+  - id: escalate.credit_above_threshold
+    when: {credit_amount_inr: {gt: 1000}}
+    reason: "Credits above INR 1,000 require manager approval."
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "3. Approval and uncertainty"
+      quote: "Any individual credit above INR 1,000 requires manager approval."
+
+  - id: escalate.unknown_facts
+    when: {has_unknowns: {eq: true}}
+    reason: "A fact the decision depends on is unknown, so no commitment is made."
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "3. Approval and uncertainty"
+      quote: "Do not promise a credit when carrier fault, pickup timing, or customer fault is unknown."
+
+  - id: escalate.conflicting_sources
+    when: {has_equal_authority_conflict: {eq: true}}
+    reason: "Two sources of equal authority disagree; a human decides rather than the system picking one."
+    source:
+      doc: 03_Cancellation_and_Service_Credit_SOP_v4
+      section: "3. Approval and uncertainty"
+      quote: >-
+        When data conflicts, identify the conflict and request verification
+        before a state-changing action.
+
+  - id: escalate.exception_requested
+    when: {exception_requested: {eq: true}}
+    origin: product_decision
+    reason: "An exception outside the account's agreement was requested. Granting one is a commercial judgement, not a policy lookup."
+
+  - id: escalate.human_requested
+    when: {human_requested: {eq: true}}
+    origin: product_decision
+    reason: "The user asked for a human."
