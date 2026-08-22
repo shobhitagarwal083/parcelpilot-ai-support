@@ -21,7 +21,9 @@ def get(principal: Principal, order_id: str) -> dict[str, Any]:
         row = conn.execute("SELECT * FROM orders WHERE order_id = ?", (order_id,)).fetchone()
     if row is None:
         raise NotFound(f"no such order: {order_id}")
-    assert_account_access(principal, row["account_id"], resource=f"order {order_id}")
+    assert_account_access(
+        principal, row["account_id"], resource=f"order {order_id}", conceal_existence=True
+    )
     return _hydrate.order(row)
 
 

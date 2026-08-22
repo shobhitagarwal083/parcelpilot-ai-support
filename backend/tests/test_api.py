@@ -105,3 +105,48 @@ def test_a_credit_needing_approval_is_refused_to_an_agent(client):
 def test_an_unknown_action_is_a_404(client):
     response = as_persona(client, "staff-rohit").get("/api/actions/deadbeef")
     assert response.status_code == 404
+
+
+def test_a_denied_record_is_indistinguishable_from_a_missing_one(client):
+    """Order IDs are sequential and guessable. A 403/404 split over them would
+    let a customer walk the range and learn another account's order volume
+    without reading a single row."""
+    customer = as_persona(client, "cust-lumenworks")
+
+    exists_elsewhere = customer.get("/api/orders/ORD-1001")
+    does_not_exist = customer.get("/api/orders/ORD-9999")
+
+    assert exists_elsewhere.status_code == does_not_exist.status_code == 404
+    assert exists_elsewhere.json() == does_not_exist.json()
+
+    own = customer.get("/api/orders/ORD-2001")
+    assert own.status_code == 200
+    assert own.json()["order_id"] == "ORD-2001"
+
+
+def test_the_same_holds_for_tickets(client):
+    customer = as_persona(client, "cust-northstar")
+    assert customer.get("/api/tickets/TKT-502").status_code == 404
+    assert customer.get("/api/tickets/TKT-999").status_code == 404
+    assert customer.get("/api/tickets/TKT-501").status_code == 200
+
+
+def test_the_audit_log_still_records_the_real_reason(client):
+    """Flattening is outward-facing only. Internally the denial is a denial, and
+    the audit row says so -- otherwise a probe would look like a typo."""
+    from app.repo import audit
+
+    as_persona(client, "cust-lumenworks").get("/api/orders/ORD-1001")
+
+    denials = [e for e in audit.entries() if e["outcome"] == "denied"]
+    assert len(denials) == 1
+    assert "ORD-1001" in denials[0]["resource"]
+    assert "ACCT-001" in denials[0]["detail"]
+
+
+def test_naming_an_account_you_do_not_own_is_a_403_not_a_404(client):
+    """Account IDs are not secret -- the persona switcher lists them -- so here
+    the specific reason is what makes the message useful."""
+    response = as_persona(client, "cust-lumenworks").get("/api/orders?account_id=ACCT-001")
+    assert response.status_code == 403
+    assert "outside this session's scope" in response.json()["detail"]

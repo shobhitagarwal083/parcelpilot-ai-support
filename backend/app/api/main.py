@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app import config
-from app.api import actions, session, signals
+from app.api import actions, records, session, signals
 
 
 def create_app() -> FastAPI:
@@ -20,6 +20,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(session.router)
+    app.include_router(records.router)
     app.include_router(actions.router)
     app.include_router(signals.router)
 

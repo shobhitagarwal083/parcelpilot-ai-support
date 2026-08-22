@@ -32,10 +32,24 @@ def current_principal(
 CurrentPrincipal = Annotated[Principal, Depends(current_principal)]
 
 
+NOT_FOUND = "not found"
+
+
 def to_http(exc: Exception) -> HTTPException:
-    """Map domain errors onto status codes without leaking what was hidden."""
+    """Map domain errors onto status codes without handing out an oracle.
+
+    A denial that would confirm a record exists is flattened to 404, so a
+    customer cannot walk ORD-1001..ORD-9999 and learn another account's order
+    volume from the status codes alone. Denials about things that are not
+    secret -- a named account, a missing capability -- stay 403, because there
+    the specific reason is what makes the message useful.
+    """
     if isinstance(exc, AccessDenied):
+        if exc.conceal_existence:
+            return HTTPException(status_code=404, detail=NOT_FOUND)
         return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, NotFound):
-        return HTTPException(status_code=404, detail=str(exc))
+        # Byte-identical to the concealed denial above. A different message
+        # would restore the oracle the status code just closed.
+        return HTTPException(status_code=404, detail=NOT_FOUND)
     return HTTPException(status_code=400, detail=str(exc))

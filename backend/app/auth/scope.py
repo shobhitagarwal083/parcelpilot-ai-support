@@ -20,10 +20,31 @@ from app.repo import audit
 
 
 class AccessDenied(PermissionError):
-    def __init__(self, principal: Principal, resource: str, reason: str) -> None:
+    """Raised whenever a principal reaches past its own scope.
+
+    `conceal_existence` marks denials where saying "this exists but is not
+    yours" would itself leak something. Order and ticket IDs are sequential and
+    guessable, so a 403/404 split over them is an enumeration oracle: a customer
+    could map another account's order volume without reading a single row. The
+    HTTP layer collapses those to 404.
+
+    The distinction is kept here rather than thrown away, because the audit log
+    and the internal console both want the real reason. Only the outward-facing
+    response is flattened.
+    """
+
+    def __init__(
+        self,
+        principal: Principal,
+        resource: str,
+        reason: str,
+        *,
+        conceal_existence: bool = False,
+    ) -> None:
         self.principal_id = principal.id
         self.resource = resource
         self.reason = reason
+        self.conceal_existence = conceal_existence
         super().__init__(f"{principal.id} may not access {resource}: {reason}")
 
 
@@ -31,7 +52,13 @@ class NotFound(LookupError):
     pass
 
 
-def assert_account_access(principal: Principal, account_id: str, *, resource: str) -> None:
+def assert_account_access(
+    principal: Principal,
+    account_id: str,
+    *,
+    resource: str,
+    conceal_existence: bool = False,
+) -> None:
     if principal.can_access(account_id):
         return
     audit.record(
@@ -45,6 +72,7 @@ def assert_account_access(principal: Principal, account_id: str, *, resource: st
         principal,
         resource,
         f"it belongs to {account_id}, which is outside this session's scope",
+        conceal_existence=conceal_existence,
     )
 
 

@@ -20,7 +20,9 @@ def get(principal: Principal, ticket_id: str) -> dict[str, Any]:
         row = conn.execute("SELECT * FROM tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
     if row is None:
         raise NotFound(f"no such ticket: {ticket_id}")
-    assert_account_access(principal, row["account_id"], resource=f"ticket {ticket_id}")
+    assert_account_access(
+        principal, row["account_id"], resource=f"ticket {ticket_id}", conceal_existence=True
+    )
     return _hydrate.ticket(row)
 
 
