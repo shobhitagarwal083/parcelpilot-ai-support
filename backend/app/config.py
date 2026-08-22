@@ -17,10 +17,17 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
+
 # ---------------------------------------------------------------- paths
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BACKEND_DIR.parent
+
+# .env lives at the repository root and is gitignored. Loaded without override,
+# so a real environment variable always wins over a stale file -- which is what
+# the hosted deployment needs, where the key comes from a secret store.
+load_dotenv(ROOT_DIR / ".env", override=False)
 
 DATA_DIR = ROOT_DIR / "data"
 SOURCE_DIR = DATA_DIR / "source"
