@@ -123,7 +123,8 @@ def test_snapshot_is_read_from_the_workbook_and_is_a_sunday():
     Sunday snapshot means their SLA clocks have not started at all."""
     assert config.SNAPSHOT_AT.strftime("%A") == "Sunday"
     assert config.SNAPSHOT_AT.isoformat() == "2026-08-16T11:00:00+05:30"
-    assert json.loads(config.SNAPSHOT_PATH.read_text())["snapshot_at"] == "2026-08-16T11:00:00+05:30"
+    written = json.loads(config.SNAPSHOT_PATH.read_text())["snapshot_at"]
+    assert written == "2026-08-16T11:00:00+05:30"
 
 
 def test_structured_ingest_is_reproducible(tmp_path):
