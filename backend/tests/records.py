@@ -70,5 +70,6 @@ def resolution_history(account_id: str) -> list[dict[str, Any]]:
 
 
 def hours_past_window_end(row: dict[str, Any], as_of: datetime) -> float:
-    reference = row["pickup_actual_at"] or as_of
-    return (reference - row["pickup_window_end"]).total_seconds() / 3600
+    from app.policy.service_credit import hours_past_window_end as compute
+
+    return compute(row, as_of)
