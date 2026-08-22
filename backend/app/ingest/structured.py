@@ -194,7 +194,10 @@ def ingest_structured(source_dir: Path | None = None, db_path: Path | None = Non
 
     config.SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
     config.SNAPSHOT_PATH.write_text(
-        json.dumps({"snapshot_at": snapshot.isoformat(), "source": f"{WORKBOOK_NAME}!README"}, indent=2)
+        json.dumps(
+            {"snapshot_at": snapshot.isoformat(), "source": f"{WORKBOOK_NAME}!README"}, indent=2
+        )
     )
 
-    return {name: len(rows) for name, rows in tables.items()} | {"snapshot_at": snapshot.isoformat()}
+    counts = {name: len(rows) for name, rows in tables.items()}
+    return counts | {"snapshot_at": snapshot.isoformat()}

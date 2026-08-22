@@ -334,7 +334,7 @@ def parse(raw: dict) -> Rulebook:
 # ---------------------------------------------------------------- validation
 
 
-def validate(book: Rulebook) -> None:
+def validate(book: Rulebook, *, manifest: dict | None = None) -> None:
     entries = (
         list(book.rules) + list(book.constraints) + list(book.severity_rules)
         + list(book.known_issues) + list(book.product_facts)
@@ -347,7 +347,7 @@ def validate(book: Rulebook) -> None:
         seen.add(entry.id)
 
     rule_ids = {r.id for r in book.rules}
-    manifest = load_manifest()
+    manifest = manifest if manifest is not None else load_manifest()
 
     for rule in book.rules:
         if rule.authority_tier not in (1, 2, 3, 4):
