@@ -25,6 +25,19 @@ DOMAIN = "service_credit"
 REQUIRED_FACTS = ("hours_past_window_end", "carrier_fault", "customer_fault")
 
 
+def hours_past_window_end(order: dict[str, Any], as_of: datetime) -> float | None:
+    """How late a pickup is, measured to the actual pickup if one happened.
+
+    A pickup that has not happened yet is measured to now, because the delay is
+    still accruing. A negative result means the window has not closed.
+    """
+    window_end = order.get("pickup_window_end")
+    if window_end is None:
+        return None
+    reference = order.get("pickup_actual_at") or as_of
+    return (reference - window_end).total_seconds() / 3600
+
+
 def evaluate(
     *,
     account_id: str,
