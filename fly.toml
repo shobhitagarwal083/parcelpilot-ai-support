@@ -1,0 +1,52 @@
+# Fly.io deployment.
+#
+# Chosen over Render for cold-start behaviour: Render's free tier sleeps and
+# wakes in roughly 50 seconds, and a reviewer forms an impression while the page
+# loads. Railway was rejected because its trial credit is time-limited and the
+# link could expire around the review window.
+#
+# The API key is set with `fly secrets set GEMINI_API_KEY=...` and is never in
+# the image or in this file.
+
+app = "parcelpilot-support"
+primary_region = "bom"          # Mumbai: the data, the currency and the
+                                # business hours are all IST.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MODEL_PROVIDER = "google"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # Kept warm. The whole reason Fly was chosen over Render is that a reviewer
+  # should not watch a spinner, and scaling to zero would hand that problem
+  # straight back. One shared-cpu-1x machine sits inside the free allowance.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    # Low on purpose. A turn holds its connection open for the length of an SSE
+    # stream, so these are long-lived rather than quick request/response pairs,
+    # and one process is serving them.
+    soft_limit = 20
+    hard_limit = 40
+
+# The health endpoint reports the provider and whether a key is present -- never
+# the key itself -- which is enough to tell a misconfigured deploy from a
+# healthy one without putting a secret in a public response.
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/api/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

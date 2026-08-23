@@ -146,3 +146,27 @@ def test_naming_an_account_you_do_not_own_is_a_403_not_a_404(client):
     response = as_persona(client, "cust-lumenworks").get("/api/orders?account_id=ACCT-001")
     assert response.status_code == 403
     assert "outside this session's scope" in response.json()["detail"]
+
+
+# ----------------------------------------------------- serving the built frontend
+
+
+def test_api_routes_win_over_the_spa_catch_all(client):
+    """The catch-all is registered last for a reason.
+
+    Declared before the routers it would swallow every endpoint, and the failure
+    would be quiet: the client would receive an HTML shell where it expected
+    JSON and report a parse error somewhere unrelated.
+    """
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_an_unknown_api_path_404s_rather_than_returning_html(client):
+    """A typo'd endpoint should look like a typo, not like a broken parser."""
+    response = client.get("/api/does-not-exist")
+
+    assert response.status_code == 404
+    assert "html" not in response.headers.get("content-type", "")

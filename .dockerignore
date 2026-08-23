@@ -1,0 +1,46 @@
+# Keep the build context small and the image free of anything that should not
+# leave this machine.
+
+# Secrets. The key reaches the container through `fly secrets`, never the image.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Private working notes.
+_internal/
+*.private.md
+scratch/
+
+# Generated inside the image by `python -m app.ingest`, so shipping a local copy
+# would only risk it being stale.
+data/index/
+data/*.db
+data/*.sqlite3
+
+# Rebuilt in the frontend stage.
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+.git/
+.github/
+.claude/
+docs/
+*.md
+!backend/README.md
+
+.DS_Store
+.idea/
+.vscode/
