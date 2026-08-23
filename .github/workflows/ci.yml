@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        working-directory: backend
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        working-directory: backend
+        run: |
+          ruff check app tests scripts
+          ruff format --check app tests scripts
+
+      # The index and database are generated, not committed, and the test
+      # fixtures *skip* when the database is missing. Without this step CI would
+      # be green while running almost nothing -- which is worse than no CI,
+      # because it is green.
+      - name: Build the index and database
+        working-directory: backend
+        run: |
+          python -m app.ingest
+          # The fixtures skip when the database is absent, so assert the
+          # precondition rather than trusting the step above reported honestly.
+          test -f ../data/parcelpilot.db
+          test -f ../data/index/chunks.json
+
+      # No API key is configured here, deliberately. The rule engine, retrieval
+      # and access control contain no model call at all, so the whole suite must
+      # pass without one -- and a test that quietly depends on a developer's
+      # local .env should fail here rather than on a reviewer's clean clone.
+      # That exact bug shipped once; this job is what stops it shipping twice.
+      - name: Test
+        working-directory: backend
+        run: pytest -q --durations=5
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck and build
+        working-directory: frontend
+        run: npm run build

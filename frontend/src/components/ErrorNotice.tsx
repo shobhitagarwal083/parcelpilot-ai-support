@@ -1,9 +1,14 @@
 import type { TurnError } from "../lib/types";
 
-/* Errors here are not incidental -- the hosted demo runs on a free-tier model
- * with a hard daily request cap, so a rate limit is the single most likely
- * thing a reviewer meets. Saying so plainly is better than a blank box that
- * reads as a broken app.
+/* Errors here are not incidental -- the hosted demo runs on a free-tier model,
+ * so a rate limit is the single most likely thing a reviewer meets. Saying so
+ * plainly beats a blank box that reads as a broken app.
+ *
+ * ⚠️ Keep this copy true. It previously told users the quota was "50 requests a
+ * day, resetting at 05:30 IST", which was accurate for the original provider
+ * and became false the moment we moved to one with per-minute limits. A
+ * confident, wrong explanation is worse than a vague one: it would have sent a
+ * reviewer away for nineteen hours over something that clears in a minute.
  */
 
 function explain(error: TurnError): { title: string; body: string } {
@@ -20,12 +25,13 @@ function explain(error: TurnError): { title: string; body: string } {
   }
   if (rateLimited || error.kind === "rate_limited") {
     return {
-      title: "The demo's model quota for today is used up",
+      title: "Too many requests just now — try again in a moment",
       body:
-        "This runs on a free-tier model capped at 50 requests a day, shared across " +
-        "everyone using the link. It resets at 05:30 IST. The decisions themselves are " +
-        "computed by the rule engine rather than the model, so nothing here is wrong — " +
-        "there is just no narrator available right now. The demo video shows the full flow.",
+        "This demo shares one free-tier model allowance across everyone using the link, " +
+        "so it limits how fast any one visitor can spend it. The limits are per-minute, " +
+        "so waiting briefly is enough. Nothing on screen is wrong: the decisions are " +
+        "computed by the rule engine rather than the model, so only the narration is " +
+        "unavailable.",
     };
   }
   if (error.kind === "turn_cap" || error.kind === "loop_cap") {

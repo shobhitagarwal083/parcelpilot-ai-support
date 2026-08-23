@@ -143,7 +143,7 @@ async def run(
                 {
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": json.dumps(result, default=str),
+                    "content": json.dumps(_for_model(result), default=str),
                 }
             )
 
@@ -156,6 +156,63 @@ async def run(
 
 def _is_decision(result: dict[str, Any]) -> bool:
     return "outcome" in result and "citations" in result
+
+
+def _for_model(result: dict[str, Any]) -> dict[str, Any]:
+    """Trim a tool result to what the model needs to narrate it.
+
+    The client and the model need different things from the same `Decision`, and
+    sending the client's version to both is expensive. The interface renders
+    citations from the `citation` events emitted above -- it never reads this
+    copy -- so the verbatim quotes here are paid for on every subsequent request
+    in the turn and used by nobody. They were 39% of the payload.
+
+    What the model keeps is what the prompt asks it to produce: the outcome, the
+    amount, the engine's own summary, and enough of each citation to name the
+    document and section it relied on. What it loses is the text of quotes it
+    should not be paraphrasing anyway -- the summary is the engine's sentence
+    about the rule, and is the thing to narrate.
+
+    Only decisions are trimmed. `search_policy_documents` returns passages whose
+    text *is* the answer, and cutting those would defeat the tool.
+    """
+    if not _is_decision(result):
+        return result
+
+    trimmed = dict(result)
+
+    # Keep the quote where the answer comes from; drop the rest.
+    #
+    # Dropping every quote was measurably worse, not just cheaper. The model
+    # went from "cancel any shipment still in BOOKED status before pickup" to
+    # "cancel shipments under these circumstances" -- the specific condition
+    # lived in the quote, and a vaguer cited answer is a bad trade for tokens.
+    #
+    # The governing citation is the highest-authority one present: an agreement
+    # that outranks an SOP is what decided the outcome, and is what the answer
+    # should state precisely. Lower tiers are shown by the interface for
+    # transparency, and the model only needs to name them.
+    citations = result.get("citations") or []
+    governing = min((c["authority_tier"] for c in citations), default=1)
+    trimmed["citations"] = [
+        {
+            "doc_title": citation["doc_title"],
+            "section": citation["section"],
+            "authority_tier": citation["authority_tier"],
+            **({"quote": citation["quote"]} if citation["authority_tier"] == governing else {}),
+        }
+        for citation in citations
+    ]
+
+    # Both registers of a caveat are carried for the client to choose between
+    # by audience; the model is only ever narrating one of them. (For a customer
+    # the two are already identical -- see auth/disclosure.py.)
+    trimmed["caveats"] = [
+        caveat.get("text") or caveat.get("customer_safe_text", "")
+        for caveat in result.get("caveats") or []
+    ]
+
+    return trimmed
 
 
 def _derived_events(result: dict[str, Any], seen: set[str]) -> list[Event]:

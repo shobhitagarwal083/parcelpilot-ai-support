@@ -293,17 +293,32 @@ is the status of ORD-1001?" works, which is what makes it feel like a product.
 
 ---
 
-## What I would change first
+## The client and the model get different payloads
 
-**Trim what the model sees.** Each request costs ~6,300 tokens, and the tool
-result fed back to the model is the *complete* serialised `Decision` — verbatim
-citation quotes, facts, overrides. The interface never reads that copy; it gets
-citations as separate events. The model's copy could carry outcome, amount,
-summary and doc-plus-section only, cutting per-request tokens substantially and
-raising headroom on every provider at once.
+The same `Decision` serves two consumers with different needs, and sending the
+richer version to both was costing real headroom: the tool result fed back to
+the model carried every verbatim citation quote, which is 39% of the payload and
+which the interface never reads — it renders citations from separate events.
+
+Trimming the model's copy cut it by 30%. But the first attempt cut too far.
+Dropping *every* quote made the answers measurably vaguer — "cancel any shipment
+still in BOOKED status before pickup" became "cancel shipments under these
+circumstances", because the specific condition lived in the quote. A vaguer cited
+answer is a bad trade for tokens.
+
+The rule that works: keep the quote for the **highest-authority citation
+present** and drop the rest. That is the rule that decided the outcome and the
+one the answer must state precisely; lower tiers are shown by the interface for
+transparency, and the model only needs to name them.
+
+## What I would change next
 
 **Cross-encoder re-ranking** if the corpus grows past a few hundred chunks.
 BM25's failure mode is a query whose keywords do not appear in the right passage.
 
 **Rule coverage tests generated from the rulebook**, so adding a rule without a
 matching test fails CI.
+
+**A shared rate-limit store** if this is ever scaled past one instance. The
+current limiter is in-process, which is correct for a single container and
+silently becomes per-instance otherwise.

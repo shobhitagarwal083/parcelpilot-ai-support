@@ -156,8 +156,12 @@ FAILOVER_PROVIDERS = ["google", "groq", "openrouter"]
 
 MAX_TOKENS = 4096
 
-# Phase 10 cost ceiling — a public URL in front of an LLM endpoint needs one.
-MAX_TURNS_PER_SESSION = 30
+# The cost ceiling. A public URL in front of a model endpoint needs one.
+#
+# There was a MAX_TURNS_PER_SESSION here. It was deleted rather than retuned:
+# it was never referenced, and it could not have been, because the chat API is
+# stateless and there is no session to count turns against. The per-IP limit in
+# api/limits.py is the control that actually holds.
 MAX_TOOL_CALLS_PER_TURN = 12
 
 

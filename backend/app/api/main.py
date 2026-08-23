@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from app import config
-from app.api import actions, chat, records, session, signals
+from app.api import actions, chat, limits, records, session, signals
 
 
 def create_app() -> FastAPI:
@@ -18,6 +18,10 @@ def create_app() -> FastAPI:
         description="Authority-aware support agent over the ParcelPilot data pack.",
         version="0.1.0",
     )
+
+    # Before the routers: a public URL in front of a model endpoint needs a
+    # ceiling, and it should reject before any work is done.
+    app.middleware("http")(limits.rate_limit)
 
     app.include_router(session.router)
     app.include_router(records.router)
