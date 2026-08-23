@@ -81,7 +81,7 @@ Open <http://localhost:5173>.
 
 ### Tests
 
-216 tests, no API key required — the rule engine, retrieval and access control
+224 tests, no API key required — the rule engine, retrieval and access control
 contain no model call at all.
 
 ```bash

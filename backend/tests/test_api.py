@@ -103,6 +103,34 @@ def test_an_unknown_action_is_a_404(client):
     assert response.status_code == 404
 
 
+def test_reaching_another_accounts_action_is_a_403_not_a_404(client):
+    """The interface reads a 404 here as "the proposal is gone" and says so --
+    the hosted demo restarts when it idles and pending actions do not survive
+    that (components/ActionCard.tsx). The explanation is only honest while a
+    vanished row is the *only* way to reach a 404 on this path.
+
+    Records go the other way on purpose: order and ticket IDs are guessable, so
+    denials over them are flattened to 404 above. Action IDs are random, there
+    is nothing to enumerate, and the specific reason is what makes the response
+    useful -- so `repo.actions.get` denies without `conceal_existence`. Turning
+    that on would silently turn the message in the interface into a lie.
+    """
+    from app.auth import principals
+    from app.repo import actions
+
+    proposed = actions.propose(
+        principals.get("staff-rohit"),
+        account_id="ACCT-002",
+        action_type="create_escalation",
+        payload={"reason": "pinning the 403"},
+    )
+
+    response = as_persona(client, "cust-northstar").post(
+        f"/api/actions/{proposed.action_id}/confirm"
+    )
+    assert response.status_code == 403
+
+
 def test_a_denied_record_is_indistinguishable_from_a_missing_one(client):
     """Order IDs are sequential and guessable. A 403/404 split over them would
     let a customer walk the range and learn another account's order volume

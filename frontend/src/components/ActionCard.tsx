@@ -11,6 +11,25 @@ import { DecisionCard } from "./DecisionCard";
  * being the only way through is the design, not a UI convenience.
  */
 
+/* A 404 on this path means the row is gone -- not that the caller may not see
+ * it. Cross-account denial here is a 403, because `assert_account_access` is
+ * called without `conceal_existence` (repo/actions.py), so this is one of the
+ * few places a specific message is both accurate and safe to give.
+ *
+ * The ordinary way to reach it: the hosted demo idles, its free tier spins the
+ * container down, and the database is baked into the image -- so a proposal
+ * left sitting while the reviewer reads the answer is not there when they click
+ * Confirm. "404 -- not found" reads like a broken app. This says what happened.
+ */
+const VANISHED =
+  "This proposal is no longer on the server. The hosted demo restarts once it has been idle, " +
+  "and pending actions do not survive that — nothing was executed, and asking again makes a fresh one.";
+
+function explain(error: unknown): string {
+  if (!(error instanceof ApiError)) return "could not reach the server";
+  return error.status === 404 ? VANISHED : `${error.status} — ${error.message}`;
+}
+
 const TITLES: Record<string, string> = {
   create_escalation: "Escalate to a human",
   update_ticket: "Update ticket",
@@ -40,11 +59,7 @@ export function ActionCard({
       const updated = await resolveAction(persona.id, action.action_id, decision);
       onResolved({ ...action, ...updated, resolution: { status: updated.status } });
     } catch (error) {
-      setFailure(
-        error instanceof ApiError
-          ? `${error.status} — ${error.message}`
-          : "could not reach the server",
-      );
+      setFailure(explain(error));
     } finally {
       setBusy(false);
     }
