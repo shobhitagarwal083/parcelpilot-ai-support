@@ -9,6 +9,12 @@
 # file. An untagged document has unknown authority, and silently defaulting it
 # to tier 2 or 3 is exactly the guess this design exists to prevent.
 #
+# `min_sections` declares structure for the same reason. A PDF extractor that
+# changes how it emits lines can strip every numbered heading from a document
+# without raising anything -- the text is still there, so the index builds and
+# the clauses are simply no longer citable. Declaring the count makes that a
+# build failure. Policy v2 has none and says so with 0.
+#
 # Tiers, from Support Policy v3 section 1:
 #   1  signed customer agreement   (scoped to one account)
 #   2  current support policy / SOP
@@ -25,6 +31,7 @@ documents:
     scope: global
     version: v3
     supersedes: 02_Support_Policy_v2_DEPRECATED
+    min_sections: 4
 
   - doc_id: 02_Support_Policy_v2_DEPRECATED
     title: ParcelPilot Support Policy v2
@@ -46,6 +53,7 @@ documents:
     effective_from: 2026-06-15
     scope: global
     version: v4
+    min_sections: 3
 
   - doc_id: 04_Product_Operations_Guide_and_Known_Issues
     title: ParcelPilot Product Operations Guide
@@ -53,6 +61,7 @@ documents:
     status: CURRENT
     effective_from: 2026-08-14
     scope: global
+    min_sections: 3
 
   - doc_id: 05_Northstar_Logistics_Enterprise_Agreement
     title: ParcelPilot - Northstar Logistics Enterprise Agreement
@@ -61,6 +70,7 @@ documents:
     effective_from: 2026-01-01
     effective_to: 2026-12-31
     scope: account:ACCT-001
+    min_sections: 4
 
   - doc_id: 06_LumenWorks_Service_Agreement
     title: ParcelPilot - LumenWorks Service Agreement
@@ -69,3 +79,4 @@ documents:
     effective_from: 2026-03-01
     effective_to: 2027-02-28
     scope: account:ACCT-002
+    min_sections: 3

@@ -119,7 +119,7 @@ interface says so plainly instead of failing as a broken app.
 
 ### Tests
 
-224 tests, no API key required.
+226 tests, no API key required.
 
 ```bash
 backend/.venv/bin/python -m pytest backend/tests

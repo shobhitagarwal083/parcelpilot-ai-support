@@ -8,8 +8,15 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "pydantic>=2.9",
     "pyyaml>=6.0",
-    "openpyxl>=3.1",
-    "pypdf>=5.1",
+    # Pinned exactly, and not as housekeeping. Both of these parse the source
+    # pack, and this system's claim is that the same question gives the same
+    # answer -- which is only true if the same PDF gives the same sections.
+    # pypdf 6.16.2 changed extraction to one token per line, so every numbered
+    # heading stopped matching and the Northstar agreement silently lost its
+    # sections: a green build serving an index with no citable clauses. A range
+    # here means the answer depends on the day the image was built.
+    "openpyxl==3.1.5",
+    "pypdf==6.16.1",
     "httpx>=0.28",
     "python-dotenv>=1.0",
 ]

@@ -104,6 +104,49 @@ def test_the_clauses_the_engine_depends_on_survive_extraction(source_copy, tmp_p
     assert "signed customer agreement first, then the current support policy" in ladder
 
 
+def test_a_document_that_loses_its_sections_aborts_the_ingest(source_copy, tmp_path, monkeypatch):
+    """Structure is declared in the manifest for the same reason authority is.
+
+    pypdf 6.16.2 changed extraction to one token per line, so every numbered
+    heading stopped matching and the Northstar agreement -- the tier-1 document
+    the whole cancellation trap turns on -- came through as one unlabelled blob.
+    Nothing raised: the build was green and the index had no citable clauses,
+    which on screen looks like a retrieval bug rather than a parsing one.
+    Declaring the count makes that a build failure instead of a mystery.
+    """
+    from dataclasses import replace
+
+    from app.ingest import documents as documents_module
+
+    real = documents_module.load_manifest()
+    target = "05_Northstar_Logistics_Enterprise_Agreement"
+    inflated = dict(real)
+    inflated[target] = replace(real[target], min_sections=99)
+    monkeypatch.setattr(documents_module, "load_manifest", lambda *a, **k: inflated)
+
+    with pytest.raises(IngestError) as exc:
+        ingest_documents(source_dir=source_copy, out_path=tmp_path / "chunks.json")
+
+    message = str(exc.value)
+    assert target in message or "Northstar" in message
+    assert "99" in message and "pypdf" in message
+    assert not (tmp_path / "chunks.json").exists()
+
+
+def test_the_extraction_shape_that_broke_the_index_yields_no_sections():
+    """The failure mode itself, pinned as a unit.
+
+    One token per line is what the newer extractor produced. No line matches a
+    numbered heading, so everything lands in Header -- which is exactly why the
+    count in the manifest is the thing worth asserting.
+    """
+    degenerate = "\n".join("2. Shipment cancellation Northstar may cancel".split())
+
+    sections = split_sections(degenerate)
+
+    assert [label for label, _ in sections] == ["Header"]
+
+
 def test_section_splitter_keeps_bullets_and_numbered_headings():
     sections = dict(
         split_sections(

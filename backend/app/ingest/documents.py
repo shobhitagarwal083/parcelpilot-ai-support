@@ -45,6 +45,11 @@ class DocumentMeta:
     version: str | None = None
     supersedes: str | None = None
     superseded_by: str | None = None
+    #: How many top-level numbered sections this document is known to contain.
+    #: Structure is declared here for the same reason authority is: so that a
+    #: document losing its shape is a failure, not a silent downgrade. Zero
+    #: means the document genuinely has none -- Policy v2 is a single notice.
+    min_sections: int = 0
 
 
 @dataclass(frozen=True)
@@ -131,8 +136,21 @@ def chunk_document(pdf_path: Path, meta: DocumentMeta) -> list[Chunk]:
     if not raw.strip():
         raise IngestError(f"{pdf_path.name}: no extractable text")
 
+    sections = split_sections(raw)
+    # Distinct top-level numbers, not labels: a section split into subheadings
+    # ("2. Current known issues / KI-208") is still one numbered section.
+    numbered = len({label.split(".", 1)[0] for label, _ in sections if label[0].isdigit()})
+    if numbered < meta.min_sections:
+        raise IngestError(
+            f"{pdf_path.name}: the manifest declares at least {meta.min_sections} numbered "
+            f"sections and extraction found {numbered}. The document has not changed, so the "
+            f"PDF extractor has -- check the pypdf version. Indexing it anyway would serve a "
+            f"document with no citable clauses, which reads as a retrieval failure rather than "
+            f"a parsing one."
+        )
+
     chunks = []
-    for n, (section, body) in enumerate(split_sections(raw)):
+    for n, (section, body) in enumerate(sections):
         chunks.append(
             Chunk(
                 chunk_id=f"{meta.doc_id}#{n}",
