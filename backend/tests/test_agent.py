@@ -196,13 +196,26 @@ def test_a_missing_key_names_the_variable_and_what_still_works(monkeypatch):
         provider._headers()
 
 
+def two_providers(monkeypatch) -> None:
+    """Pin the candidate chain, so these tests do not read the developer's .env.
+
+    Without this they pass on a machine that happens to have keys configured and
+    fail on a clean clone -- which is exactly backwards, since a clean clone is
+    what a reviewer runs. The README promises the suite needs no API key.
+    """
+    monkeypatch.setattr(config, "PROVIDER", "google")
+    monkeypatch.setattr(config, "FAILOVER_PROVIDERS", ["google", "groq"])
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key-google")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key-groq")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+
 @pytest.mark.asyncio
 async def test_failover_tries_the_next_candidate_when_the_first_will_not_serve(monkeypatch):
     """Capacity failures are what this exists for; every free tier hits them."""
     attempted: list[tuple[str, str]] = []
+    two_providers(monkeypatch)
     candidates = config.candidates()
-    if len(candidates) < 2:
-        pytest.skip("needs at least two configured candidates")
 
     async def flaky(messages, tools, *, provider, model, timeout):
         attempted.append((provider, model))
@@ -255,6 +268,8 @@ async def test_failover_does_not_splice_two_answers_together(monkeypatch):
     """Once the client has seen output, retrying elsewhere would join half of
     one answer to half of another -- worse than surfacing the error."""
 
+    two_providers(monkeypatch)
+
     async def dies_mid_stream(messages, tools, *, provider, model, timeout):
         yield provider_module.TextDelta("the fee is ")
         raise provider_module.ProviderError("provider returned 500: upstream died")
@@ -273,6 +288,8 @@ async def test_failover_does_not_splice_two_answers_together(monkeypatch):
 async def test_a_pinned_model_never_fails_over(monkeypatch):
     """Substituting a different model would invalidate the bake-off silently."""
     attempted: list[str] = []
+
+    two_providers(monkeypatch)
 
     async def always_fails(messages, tools, *, provider, model, timeout):
         attempted.append(model)
