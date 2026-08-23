@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { ApiError, fetchSignals } from "../lib/api";
-import { RANKS, type Persona, type Signal } from "../lib/types";
+import { useCallback, useEffect, useState } from "react";
+import { ApiError, fetchActions, fetchSignals } from "../lib/api";
+import { RANKS, type Persona, type ProposedAction, type Signal } from "../lib/types";
+import { ActionCard } from "./ActionCard";
 import { DecisionCard } from "./DecisionCard";
 
 /* Problem 1 -- proactive issue detection.
@@ -51,8 +52,26 @@ function SignalCard({ signal }: { signal: Signal }) {
 
 export function TriageBoard({ persona }: { persona: Persona }) {
   const [signals, setSignals] = useState<Signal[]>([]);
+  const [queue, setQueue] = useState<ProposedAction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  /* An action proposed in one session has to be resolvable from another.
+   *
+   * Switching persona clears the transcript, so a card telling an agent to
+   * "switch to a manager to approve" would send them somewhere the card no
+   * longer exists. The pending row outlives the conversation on the server, and
+   * this is where it surfaces -- which is also how the real workflow runs: the
+   * manager approving a credit is not the person who proposed it. */
+  const refreshQueue = useCallback(() => {
+    fetchActions(persona.id)
+      .then((found) =>
+        setQueue(found.filter((action) => ["PENDING", "NEEDS_APPROVAL"].includes(action.status))),
+      )
+      .catch(() => setQueue([]));
+  }, [persona.id]);
+
+  useEffect(refreshQueue, [refreshQueue]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,6 +109,28 @@ export function TriageBoard({ persona }: { persona: Persona }) {
             asked. Ranked by urgency, each with the evidence behind it.
           </p>
         </div>
+
+        {queue.length > 0 && (
+          <div className="rank-group">
+            <div className="rank-label rank-high">
+              <span>awaiting a human · {queue.length}</span>
+              <span className="rank-rule" />
+            </div>
+            {queue.map((action) => (
+              <div key={action.action_id} style={{ marginBottom: 9 }}>
+                <ActionCard
+                  action={action}
+                  persona={persona}
+                  onResolved={(updated) => {
+                    setQueue((current) =>
+                      current.filter((item) => item.action_id !== updated.action_id),
+                    );
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
 
         {loading && (
           <div className="thinking">

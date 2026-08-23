@@ -85,7 +85,7 @@ export function ActionCard({
             {!canApprove && (
               <span className="action-note">
                 Above the ₹1,000 approval threshold in SOP v4 §3 — needs a support manager.
-                Switch to Priya to approve.
+                It stays queued on the triage board until one approves it.
               </span>
             )}
           </div>

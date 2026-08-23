@@ -42,6 +42,16 @@ export async function fetchSignals(personaId: string): Promise<Signal[]> {
   return body.signals ?? [];
 }
 
+export async function fetchActions(
+  personaId: string,
+  status?: string,
+): Promise<ProposedAction[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${BASE}/actions${query}`, { headers: headers(personaId) });
+  const body = (await unwrap(response)) as { actions: ProposedAction[] };
+  return body.actions ?? [];
+}
+
 export async function resolveAction(
   personaId: string,
   actionId: string,

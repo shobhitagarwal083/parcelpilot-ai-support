@@ -49,6 +49,35 @@ SCRIPTS: list[tuple[re.Pattern[str], list[tuple[str, list[tuple[str, dict[str, A
         ],
     ),
     (
+        # The requirement-4 beat: a credit above the SOP's ₹1,000 threshold, so
+        # the card lands as NEEDS_APPROVAL and only a manager can clear it.
+        re.compile(r"escalate|refund|compensat|goodwill", re.I),
+        [
+            ("", [("get_ticket", {"ticket_id": "TKT-501"})]),
+            (
+                "",
+                [
+                    (
+                        "propose_action",
+                        {
+                            "action_type": "issue_service_credit",
+                            "account_id": "ACCT-001",
+                            "target_id": "TKT-501",
+                            "amount_inr": 1500,
+                            "reason": "Goodwill credit for the breached P1 first-response target.",
+                        },
+                    )
+                ],
+            ),
+            (
+                "I've prepared a ₹1,500 goodwill credit against TKT-501. Nothing has been "
+                "issued yet — it is above the ₹1,000 threshold in SOP v4 §3, so it needs a "
+                "support manager to approve it. Review the details below and confirm.",
+                [],
+            ),
+        ],
+    ),
+    (
         re.compile(r"credit", re.I),
         [
             (
