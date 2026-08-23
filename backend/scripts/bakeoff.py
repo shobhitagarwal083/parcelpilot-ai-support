@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -26,6 +27,15 @@ from app.auth import principals
 
 CANDIDATES = [config.PRIMARY_MODEL, *config.FALLBACK_MODELS]
 
+#: A free-tier pool being saturated says nothing about whether a model can hold a
+#: tool chain. Scoring it as a chain failure would decide the primary on who
+#: happened to be busy during the run, which is not the metric this exists to
+#: measure. Runs that fail this way are retried, then reported on their own axis.
+UNAVAILABLE = re.compile(
+    r"\b(429|50[0234])\b|rate.?limit|temporarily|overloaded|capacity|timeout|timed out",
+    re.I,
+)
+
 
 @dataclass(frozen=True)
 class Question:
@@ -35,8 +45,13 @@ class Question:
     #: The decision tool the chain must reach. Anything short of this is an
     #: answer the model composed itself, which is the failure mode that matters.
     must_reach: str
-    #: Phrases that indicate the right answer survived narration.
-    expects_any: tuple[str, ...]
+    #: The verdict must survive narration. Patterns, not substrings: "a 4-hour
+    #: threshold" and "4 hours" are the same answer, and a matcher that accepts
+    #: one but not the other understates a model it should not.
+    right: re.Pattern[str]
+    #: The confidently-wrong answer this question is engineered to produce. Worth
+    #: counting separately -- silence and a wrong verdict are not the same failure.
+    wrong: re.Pattern[str]
 
 
 QUESTIONS = (
@@ -45,17 +60,29 @@ QUESTIONS = (
         persona="cust-northstar",
         text="Can Northstar cancel ORD-1001 without a cancellation fee? Explain why.",
         must_reach="evaluate_cancellation",
-        expects_any=("no fee", "no cancellation fee", "without a fee", "0"),
+        right=re.compile(
+            r"no (cancellation )?fee|without (a|any)( cancellation)? fee"
+            r"|fee (is |will be )?waive|no charge|free of charge|₹\s?0\b",
+            re.I,
+        ),
+        # T1/T2: the SOP's ₹250, which TKT-450 also wrongly asserts.
+        wrong=re.compile(r"(₹|inr|rs\.?)\s?250|250 (rupee|fee)", re.I),
     ),
     Question(
         label="Q2 service credit",
         persona="cust-lumenworks",
         text=(
-            "A pickup is three hours late because of carrier fault. "
-            "Should I get a service credit?"
+            "A pickup is three hours late because of carrier fault. Should I get a service credit?"
         ),
         must_reach="evaluate_service_credit",
-        expects_any=("not eligible", "no credit", "4 hours", "four hours"),
+        right=re.compile(
+            r"not eligible|ineligible|no (service )?credit|not entitled"
+            r"|does not (qualify|meet|apply)|doesn't (qualify|meet)|^\s*#*\s*no\b",
+            re.I,
+        ),
+        # T4: the SOP's 2-hour threshold applied to an account whose agreement
+        # replaced it with 4 hours.
+        wrong=re.compile(r"you (are|would be) eligible|credit (is|of) ₹?\s?\d|₹\s?240", re.I),
     ),
 )
 
@@ -68,13 +95,35 @@ class Run:
     answer: str = ""
     seconds: float = 0.0
     failed: str | None = None
+    attempts: int = 1
+
+    @property
+    def unavailable(self) -> bool:
+        """Failed because the provider would not serve it, not because it fumbled."""
+        return bool(self.failed) and bool(UNAVAILABLE.search(self.failed))
+
+    @property
+    def served(self) -> bool:
+        return not self.unavailable
 
     def reached(self, tool_name: str) -> bool:
         return tool_name in self.tools_called
 
-    def answered_correctly(self, expects_any: tuple[str, ...]) -> bool:
-        lowered = self.answer.lower()
-        return any(phrase in lowered for phrase in expects_any)
+    def verdict(self, question: Question) -> str:
+        """The right verdict wins even when the wrong number is also present.
+
+        Deliberate, and the ordering is the whole point. D-15 requires an
+        overridden rule to be *disclosed* rather than silently dropped, so the
+        correct answer to Q1 says "the SOP would have charged ₹250, but your
+        agreement waives it" -- it quotes the wrong number on purpose. Checking
+        `wrong` first would score that as a failure and penalise precisely the
+        disclosure the design exists to produce.
+        """
+        if question.right.search(self.answer):
+            return "right"
+        if question.wrong.search(self.answer):
+            return "wrong"
+        return "unclear"
 
 
 async def supports_tool_calling(model: str) -> bool | None:
@@ -126,10 +175,32 @@ async def one_run(question: Question, model: str) -> Run:
     return record
 
 
+async def run_measured(question: Question, model: str, *, retries: int) -> Run:
+    """Retry past a saturated free-tier pool so capability is what gets measured.
+
+    Only capacity failures are retried. A model that fumbles the chain is not
+    given a second attempt -- that is the thing being measured.
+    """
+    record = await one_run(question, model)
+    for attempt in range(1, retries + 1):
+        if not record.unavailable:
+            break
+        await asyncio.sleep(2**attempt)
+        record = await one_run(question, model)
+        record.attempts = attempt + 1
+    return record
+
+
 async def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--models", nargs="*", default=CANDIDATES)
+    parser.add_argument("--retries", type=int, default=3, help="retries per capacity failure")
+    parser.add_argument(
+        "--dump",
+        help="write every answer and its verdict here, so the scoring can be audited "
+        "rather than trusted",
+    )
     args = parser.parse_args()
 
     if not config.openrouter_api_key():
@@ -156,44 +227,98 @@ async def main() -> int:
 
     for model in usable:
         for question in QUESTIONS:
-            runs = [await one_run(question, model) for _ in range(args.runs)]
+            runs = [
+                await run_measured(question, model, retries=args.retries) for _ in range(args.runs)
+            ]
             results[(model, question.label)] = runs
-            reached = sum(r.reached(question.must_reach) for r in runs)
-            correct = sum(r.answered_correctly(question.expects_any) for r in runs)
-            invented = sum(bool(r.unknown_tools) for r in runs)
-            failed = sum(bool(r.failed) for r in runs)
-            median = sorted(r.seconds for r in runs)[len(runs) // 2]
+            served = [r for r in runs if r.served]
+            reached = sum(r.reached(question.must_reach) for r in served)
+            right = sum(r.verdict(question) == "right" for r in served)
+            wrong = sum(r.verdict(question) == "wrong" for r in served)
+            invented = sum(bool(r.unknown_tools) for r in served)
+            median = sorted(r.seconds for r in served)[len(served) // 2] if served else 0.0
             print(
                 f"  {model:<44} {question.label:<18} "
-                f"chain {reached}/{args.runs}  answer {correct}/{args.runs}  "
-                f"invented {invented}  failed {failed}  {median:5.1f}s"
+                f"served {len(served)}/{args.runs}  chain {reached}/{len(served) or '-'}  "
+                f"right {right}  wrong {wrong}  invented {invented}  {median:5.1f}s"
             )
 
-    print("\nSummary -- tool-chain completion rate is the deciding metric\n")
+    print("\nSummary\n")
+    print("  chain = tool-chain completion, the deciding metric (over served runs only).")
+    print(
+        "  served = runs the provider actually answered -- a capacity axis, not a capability one.\n"
+    )
+
     ranked = []
     for model in usable:
         runs = [r for q in QUESTIONS for r in results[(model, q.label)]]
+        served = [r for r in runs if r.served]
         reached = sum(
-            r.reached(q.must_reach) for q in QUESTIONS for r in results[(model, q.label)]
-        )
-        correct = sum(
-            r.answered_correctly(q.expects_any)
+            r.reached(q.must_reach)
             for q in QUESTIONS
             for r in results[(model, q.label)]
+            if r.served
         )
-        total = len(runs)
-        ranked.append((reached / total, correct / total, model))
+        right = sum(
+            r.verdict(q) == "right"
+            for q in QUESTIONS
+            for r in results[(model, q.label)]
+            if r.served
+        )
+        chain_rate = reached / len(served) if served else 0.0
+        ranked.append((chain_rate, right, len(served), model))
+        availability = f"served {len(served)}/{len(runs)}"
+        if not served:
+            print(f"  {model:<44} {availability} -- NOT RANKABLE, provider never answered")
+            continue
         print(
-            f"  {model:<44} chain {reached}/{total} ({reached / total:.0%})  "
-            f"answer {correct}/{total} ({correct / total:.0%})"
+            f"  {model:<44} chain {reached}/{len(served)} ({chain_rate:.0%})  "
+            f"right {right}/{len(served)}  {availability}"
         )
 
-    ranked.sort(reverse=True)
-    print(f"\n  -> primary should be: {ranked[0][2]}")
-    if len(ranked) > 1:
-        print(f"     fallback:          {ranked[1][2]}")
+    if args.dump:
+        _dump(args.dump, results)
+        print(f"\n  Answers written to {args.dump} -- read them before trusting the counts.")
+
+    rankable = [entry for entry in ranked if entry[2] > 0]
+    if not rankable:
+        print("\n  No model was served often enough to rank. Retry when the pool frees up.")
+        return 1
+
+    rankable.sort(reverse=True)
+    print(f"\n  -> primary should be: {rankable[0][3]}")
+    if len(rankable) > 1:
+        print(f"     fallback:          {rankable[1][3]}")
+
+    starved = [entry for entry in ranked if entry[2] < len(QUESTIONS) * args.runs]
+    if starved:
+        print(
+            "\n  Note: capacity failures occurred. Availability is a real constraint on a\n"
+            "  hosted demo, but it is not chain-completion -- weigh the two separately."
+        )
     print("\n  Set these in app/config.py (PRIMARY_MODEL / FALLBACK_MODELS).")
+
     return 0
+
+
+def _dump(path: str, results: dict[tuple[str, str], list[Run]]) -> None:
+    """Written before the ranking, not after.
+
+    A run where nothing was served produces no ranking at all, and that is
+    precisely the run whose error messages you need to read.
+    """
+    lines = []
+    for (model, label), runs in results.items():
+        question = next(q for q in QUESTIONS if q.label == label)
+        for index, run in enumerate(runs, start=1):
+            lines.append(f"=== {model} | {label} | run {index} (attempts: {run.attempts}) ===")
+            lines.append(f"verdict: {run.verdict(question)}   chain: {run.tools_called}")
+            if run.failed:
+                lines.append(f"failed: {run.failed}")
+            lines.append(run.answer or "(no answer)")
+            lines.append("")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
 
 
 if __name__ == "__main__":

@@ -77,9 +77,15 @@ BUSINESS_MINUTES_PER_DAY = (BUSINESS_END_HOUR - BUSINESS_START_HOUR) * 60  # 540
 # D-14: OpenRouter free tier, sent as a model-fallback array in one request so
 # that free-tier capacity failures fail over rather than failing the demo.
 # Nothing outside app/agent/provider.py may import a vendor client.
+#
+# Ordering set by the phase 05a bake-off, not by published throughput figures.
+# D-14 provisionally led with GLM on its 147 t/s; measurement reversed it.
+# Nemotron completed the tool chain 10/10 while GLM was never served at all
+# (`scripts/bakeoff.py`, 2026-08-23). GLM stays in the array because a fallback
+# that is merely unavailable today costs nothing and may recover tomorrow.
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-PRIMARY_MODEL = "z-ai/glm-5.2:free"
-FALLBACK_MODELS = ["nvidia/nemotron-3-nano-30b-a3b:free"]
+PRIMARY_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
+FALLBACK_MODELS = ["z-ai/glm-5.2:free"]
 MAX_TOKENS = 4096
 
 # Phase 10 cost ceiling — a public URL in front of an LLM endpoint needs one.
