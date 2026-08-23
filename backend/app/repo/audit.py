@@ -38,9 +38,7 @@ def entries(limit: int = 100) -> list[dict[str, Any]]:
     with connect() as conn:
         return [
             dict(row)
-            for row in conn.execute(
-                "SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,)
-            )
+            for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
         ]
 
 

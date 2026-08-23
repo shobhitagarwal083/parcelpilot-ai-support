@@ -53,7 +53,7 @@ something, say so instead of reaching for what you remember.
 
 # Time
 
-The current date and time is {config.SNAPSHOT_AT.strftime('%A %d %B %Y, %H:%M')} IST.
+The current date and time is {config.SNAPSHOT_AT.strftime("%A %d %B %Y, %H:%M")} IST.
 Note the day of the week. Response targets marked "business hours" do not run at
 weekends, so a ticket raised on a Sunday may not have started its clock at all --
 that is different from being within target, and the tools distinguish them.

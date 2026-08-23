@@ -217,8 +217,7 @@ class Rulebook:
 
     def constraints_for(self, domain: str, account_id: str | None) -> list[Constraint]:
         return [
-            c for c in self.constraints
-            if c.domain == domain and c.applies_to_account(account_id)
+            c for c in self.constraints if c.domain == domain and c.applies_to_account(account_id)
         ]
 
     def known_issue(self, issue_id: str) -> KnownIssue | None:
@@ -270,16 +269,22 @@ def parse(raw: dict) -> Rulebook:
     )
     constraints = tuple(
         Constraint(
-            id=e["id"], domain=e["domain"], kind=e["kind"],
-            authority_tier=e["authority_tier"], accounts=_accounts(e),
-            amount_inr=e["amount_inr"], source=_source(e, e["id"]),
-            human_reason=e.get("human_reason"), note=e.get("note"),
+            id=e["id"],
+            domain=e["domain"],
+            kind=e["kind"],
+            authority_tier=e["authority_tier"],
+            accounts=_accounts(e),
+            amount_inr=e["amount_inr"],
+            source=_source(e, e["id"]),
+            human_reason=e.get("human_reason"),
+            note=e.get("note"),
         )
         for e in raw.get("constraints", [])
     )
     severity_rules = tuple(
         SeverityRule(
-            id=e["id"], level=e["level"],
+            id=e["id"],
+            level=e["level"],
             any_phrase=tuple(p.lower() for p in e.get("any_phrase", ())),
             all_of=tuple(
                 tuple(p.lower() for p in group["any_phrase"]) for group in e.get("all_of", ())
@@ -290,8 +295,11 @@ def parse(raw: dict) -> Rulebook:
     )
     known_issues = tuple(
         KnownIssue(
-            id=e["id"], title=e["title"], issue_status=e["issue_status"],
-            authority_tier=e["authority_tier"], when=e.get("when") or {},
+            id=e["id"],
+            title=e["title"],
+            issue_status=e["issue_status"],
+            authority_tier=e["authority_tier"],
+            when=e.get("when") or {},
             caveat=" ".join(e["caveat"].split()),
             customer_caveat=" ".join(e["customer_caveat"].split()),
             source=_source(e, e["id"]),
@@ -301,14 +309,19 @@ def parse(raw: dict) -> Rulebook:
     )
     product_facts = tuple(
         ProductFact(
-            id=e["id"], topic=e["topic"], when=e.get("when") or {}, then=e["then"],
-            authority_tier=e["authority_tier"], source=_source(e, e["id"]),
+            id=e["id"],
+            topic=e["topic"],
+            when=e.get("when") or {},
+            then=e["then"],
+            authority_tier=e["authority_tier"],
+            source=_source(e, e["id"]),
         )
         for e in raw.get("product_facts", [])
     )
     contradiction_checks = tuple(
         ContradictionCheck(
-            id=e["id"], domain=e["domain"],
+            id=e["id"],
+            domain=e["domain"],
             resolution_matches_any=tuple(p.lower() for p in e["resolution_matches_any"]),
             why_wrong=" ".join(e["why_wrong"].split()),
             when_decision=e.get("when_decision") or {},
@@ -318,16 +331,22 @@ def parse(raw: dict) -> Rulebook:
     )
     escalation = tuple(
         EscalationTrigger(
-            id=e["id"], when=e["when"], reason=e["reason"],
+            id=e["id"],
+            when=e["when"],
+            reason=e["reason"],
             source=_source(e, e["id"]) if e.get("source") else None,
             origin=e.get("origin", "document"),
         )
         for e in raw.get("escalation", [])
     )
     return Rulebook(
-        rules=rules, constraints=constraints, severity_rules=severity_rules,
-        known_issues=known_issues, product_facts=product_facts,
-        contradiction_checks=contradiction_checks, escalation=escalation,
+        rules=rules,
+        constraints=constraints,
+        severity_rules=severity_rules,
+        known_issues=known_issues,
+        product_facts=product_facts,
+        contradiction_checks=contradiction_checks,
+        escalation=escalation,
     )
 
 
@@ -336,9 +355,13 @@ def parse(raw: dict) -> Rulebook:
 
 def validate(book: Rulebook, *, manifest: dict | None = None) -> None:
     entries = (
-        list(book.rules) + list(book.constraints) + list(book.severity_rules)
-        + list(book.known_issues) + list(book.product_facts)
-        + list(book.contradiction_checks) + list(book.escalation)
+        list(book.rules)
+        + list(book.constraints)
+        + list(book.severity_rules)
+        + list(book.known_issues)
+        + list(book.product_facts)
+        + list(book.contradiction_checks)
+        + list(book.escalation)
     )
     seen: set[str] = set()
     for entry in entries:

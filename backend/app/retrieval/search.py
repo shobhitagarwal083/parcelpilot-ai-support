@@ -103,9 +103,7 @@ def search(
     include_deprecated: bool = False,
 ) -> list[Hit]:
     if include_deprecated:
-        require_capability(
-            principal, READ_DEPRECATED, action="search superseded documents"
-        )
+        require_capability(principal, READ_DEPRECATED, action="search superseded documents")
 
     corpus = load_chunks()
     terms = tokenize(query)
@@ -143,9 +141,7 @@ def search(
             continue
 
         deprecated = chunk["status"] == "DEPRECATED"
-        weight = (
-            DEPRECATED_WEIGHT if deprecated else AUTHORITY_WEIGHT[chunk["authority_tier"]]
-        )
+        weight = DEPRECATED_WEIGHT if deprecated else AUTHORITY_WEIGHT[chunk["authority_tier"]]
         hits.append(
             Hit(
                 chunk=chunk,

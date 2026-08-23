@@ -110,9 +110,7 @@ PERSONAS: dict[str, Principal] = {
             kind="internal",
             role="support_manager",
             account_ids=frozenset(),
-            capabilities=frozenset(
-                {PROPOSE, READ_ANY, SIGNALS, APPROVE_CREDIT, READ_DEPRECATED}
-            ),
+            capabilities=frozenset({PROPOSE, READ_ANY, SIGNALS, APPROVE_CREDIT, READ_DEPRECATED}),
         ),
     )
 }

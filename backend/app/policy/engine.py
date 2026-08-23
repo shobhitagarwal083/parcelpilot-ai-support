@@ -83,9 +83,7 @@ def resolve(
     would_have_matched = tuple(r for r in suppressed if r.matches(facts))
 
     if not matched:
-        return Resolution(
-            winner=None, replaced=would_have_matched, considered=tuple(candidates)
-        )
+        return Resolution(winner=None, replaced=would_have_matched, considered=tuple(candidates))
 
     winner, rest = matched[0], tuple(matched[1:])
     conflicts = tuple(

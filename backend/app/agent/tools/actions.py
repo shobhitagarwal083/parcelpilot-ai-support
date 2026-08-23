@@ -40,7 +40,7 @@ from app.repo import actions
             "amount_inr": {
                 "type": "number",
                 "description": "For issue_service_credit only. Use the amount the evaluate "
-                               "tool returned; do not compute one.",
+                "tool returned; do not compute one.",
             },
             "status": {
                 "type": "string",

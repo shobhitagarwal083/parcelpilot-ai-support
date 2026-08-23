@@ -53,8 +53,8 @@ def test_l2_an_account_with_no_agreement_falls_back_to_policy(now):
 @pytest.mark.parametrize(
     ("ticket_id", "severity", "target", "due"),
     [
-        ("TKT-502", "P2", 240, "2026-08-17T13:00:00+05:30"),   # L3
-        ("TKT-504", "P3", 480, "2026-08-17T17:00:00+05:30"),   # L4
+        ("TKT-502", "P2", 240, "2026-08-17T13:00:00+05:30"),  # L3
+        ("TKT-504", "P3", 480, "2026-08-17T17:00:00+05:30"),  # L4
         ("TKT-503", "P3", 1080, "2026-08-18T18:00:00+05:30"),  # L5
     ],
 )

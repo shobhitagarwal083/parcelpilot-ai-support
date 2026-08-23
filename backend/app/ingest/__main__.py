@@ -27,13 +27,16 @@ def main() -> int:
         by_tier[chunk.authority_tier] = by_tier.get(chunk.authority_tier, 0) + 1
 
     print(f"snapshot   {counts['snapshot_at']}  (from the workbook's own README sheet)")
-    print(f"documents  {len(chunks)} chunks  " + "  ".join(
-        f"tier{t}={n}" for t, n in sorted(by_tier.items())
-    ))
+    print(
+        f"documents  {len(chunks)} chunks  "
+        + "  ".join(f"tier{t}={n}" for t, n in sorted(by_tier.items()))
+    )
     deprecated = sum(1 for c in chunks if c.status == "DEPRECATED")
     print(f"           {deprecated} chunk(s) marked DEPRECATED and excluded from default search")
-    print(f"structured accounts={counts['accounts']} orders={counts['orders']} "
-          f"tickets={counts['tickets']}")
+    print(
+        f"structured accounts={counts['accounts']} orders={counts['orders']} "
+        f"tickets={counts['tickets']}"
+    )
     print(f"wrote      {config.CHUNKS_PATH.relative_to(config.ROOT_DIR)}")
     print(f"           {config.DB_PATH.relative_to(config.ROOT_DIR)}")
     print(f"           {config.SNAPSHOT_PATH.relative_to(config.ROOT_DIR)}")

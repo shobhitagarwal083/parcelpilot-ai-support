@@ -8,8 +8,11 @@ from typing import Any
 from app import config
 
 ORDER_TIMESTAMPS = (
-    "booked_at", "pickup_window_start", "pickup_window_end",
-    "pickup_actual_at", "cancellation_requested_at",
+    "booked_at",
+    "pickup_window_start",
+    "pickup_window_end",
+    "pickup_actual_at",
+    "cancellation_requested_at",
 )
 TICKET_TIMESTAMPS = ("created_at", "last_customer_message_at")
 ORDER_BOOLEANS = ("carrier_fault", "customer_fault")

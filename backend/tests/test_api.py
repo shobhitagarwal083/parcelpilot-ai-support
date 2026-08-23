@@ -70,14 +70,10 @@ def test_confirming_an_action_from_the_wrong_account_is_forbidden(client):
         target_id="ORD-2002",
     )
 
-    denied = as_persona(client, "cust-northstar").post(
-        f"/api/actions/{proposed.action_id}/confirm"
-    )
+    denied = as_persona(client, "cust-northstar").post(f"/api/actions/{proposed.action_id}/confirm")
     assert denied.status_code == 403
 
-    allowed = as_persona(client, "staff-rohit").post(
-        f"/api/actions/{proposed.action_id}/confirm"
-    )
+    allowed = as_persona(client, "staff-rohit").post(f"/api/actions/{proposed.action_id}/confirm")
     assert allowed.status_code == 200
     assert allowed.json()["status"] == "EXECUTED"
 

@@ -16,10 +16,14 @@ Tier = Literal[1, 2, 3, 4]
 Domain = Literal["cancellation", "service_credit", "sla"]
 
 Outcome = Literal[
-    "allowed", "denied",                          # cancellation
-    "eligible", "ineligible",                     # service credit
-    "breached", "within_target", "not_started",   # sla
-    "indeterminate",                              # any domain: we do not know
+    "allowed",
+    "denied",  # cancellation
+    "eligible",
+    "ineligible",  # service credit
+    "breached",
+    "within_target",
+    "not_started",  # sla
+    "indeterminate",  # any domain: we do not know
 ]
 
 Coverage = Literal["24x7", "business"]

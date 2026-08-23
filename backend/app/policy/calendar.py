@@ -40,10 +40,7 @@ def _day_end(when: datetime) -> datetime:
 
 
 def is_business_time(when: datetime) -> bool:
-    return (
-        when.weekday() in config.BUSINESS_DAYS
-        and _day_start(when) <= when < _day_end(when)
-    )
+    return when.weekday() in config.BUSINESS_DAYS and _day_start(when) <= when < _day_end(when)
 
 
 def next_business_instant(when: datetime) -> datetime:

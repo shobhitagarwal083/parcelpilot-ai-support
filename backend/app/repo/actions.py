@@ -42,7 +42,10 @@ ActionType = Literal[
 Status = Literal["PENDING", "NEEDS_APPROVAL", "EXECUTED", "REJECTED"]
 
 ACTION_TYPES: tuple[ActionType, ...] = (
-    "create_escalation", "update_ticket", "create_followup_task", "issue_service_credit",
+    "create_escalation",
+    "update_ticket",
+    "create_followup_task",
+    "issue_service_credit",
 )
 
 #: Effects that touch the supplied data are applied; everything else is an
@@ -91,9 +94,7 @@ class PendingAction:
 
 def approval_threshold_inr() -> Decimal:
     """From SOP v4 section 3, via the rulebook -- not an invented number."""
-    constraint = next(
-        c for c in load().constraints if c.kind == "approval_threshold"
-    )
+    constraint = next(c for c in load().constraints if c.kind == "approval_threshold")
     return Decimal(str(constraint.amount_inr))
 
 
@@ -144,9 +145,15 @@ def propose(
             "action_type, target_id, payload, decision, status) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                action.action_id, action.created_at, action.principal_id, action.account_id,
-                action.action_type, action.target_id, json.dumps(action.payload),
-                json.dumps(action.decision) if action.decision else None, action.status,
+                action.action_id,
+                action.created_at,
+                action.principal_id,
+                action.account_id,
+                action.action_type,
+                action.target_id,
+                json.dumps(action.payload),
+                json.dumps(action.decision) if action.decision else None,
+                action.status,
             ),
         )
 

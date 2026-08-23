@@ -112,7 +112,7 @@ def _sla_breaches(all_tickets, all_accounts, as_of) -> list[Signal]:
                 evidence=(ticket["ticket_id"],),
                 account_id=ticket["account_id"],
                 suggested_action="Respond now and escalate; Policy v3 section 4 requires the "
-                                 "breach to be stated rather than hidden.",
+                "breach to be stated rather than hidden.",
                 decision=decision,
             )
         )
@@ -140,7 +140,7 @@ def _security_incidents(all_tickets) -> list[Signal]:
                 evidence=(ticket["ticket_id"],),
                 account_id=ticket["account_id"],
                 suggested_action="Treat as a live security incident: revoke and rotate the "
-                                 "exposed key, then confirm with the customer.",
+                "exposed key, then confirm with the customer.",
             )
         )
     return signals
@@ -232,7 +232,7 @@ def _known_issue_clusters(all_tickets, all_accounts) -> list[Signal]:
                 ),
                 evidence=ids,
                 suggested_action="Link both tickets to the known issue and send the documented "
-                                 "workaround rather than diagnosing each one separately.",
+                "workaround rather than diagnosing each one separately.",
             )
         )
     return signals
@@ -251,8 +251,7 @@ def _issue_facts(ticket: dict, account: dict) -> dict[str, Any]:
 
 def _stalled_cancellations(all_orders) -> list[Signal]:
     stalled = [
-        o for o in all_orders
-        if o.get("cancellation_requested_at") and o["status"] == "BOOKED"
+        o for o in all_orders if o.get("cancellation_requested_at") and o["status"] == "BOOKED"
     ]
     if not stalled:
         return []
@@ -269,7 +268,7 @@ def _stalled_cancellations(all_orders) -> list[Signal]:
             ),
             evidence=ids,
             suggested_action="Work through the backlog: confirm each cancellation, apply the "
-                             "fee the rules give, and release the booking.",
+            "fee the rules give, and release the booking.",
         )
     ]
 
@@ -302,7 +301,7 @@ def _carrier_concentration(all_orders) -> list[Signal]:
             ),
             evidence=involved,
             suggested_action="Check whether any open issues share this carrier before treating "
-                             "them as unrelated.",
+            "them as unrelated.",
         )
     ]
 
@@ -332,12 +331,12 @@ def _contradicted_guidance(all_tickets, as_of) -> list[Signal]:
                     detector="contradicted_guidance",
                     rank="low",
                     title=f"{ticket['ticket_id']} was closed with guidance the current rules "
-                          f"contradict",
+                    f"contradict",
                     detail=f'Recorded resolution: "{recorded}" {check.why_wrong}',
                     evidence=(ticket["ticket_id"],),
                     account_id=ticket["account_id"],
                     suggested_action="Re-contact the customer with the correct position, and "
-                                     "check whether anything was charged in error.",
+                    "check whether anything was charged in error.",
                 )
             )
             break

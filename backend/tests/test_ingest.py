@@ -105,14 +105,16 @@ def test_the_clauses_the_engine_depends_on_survive_extraction(source_copy, tmp_p
 
 
 def test_section_splitter_keeps_bullets_and_numbered_headings():
-    sections = dict(split_sections(
-        "Doc Title\n"
-        "Status:  CURRENT\n"
-        "1.  First  section\n"
-        "●  alpha  item.  ●  beta  item.\n"
-        "2.  Second  section\n"
-        "body  text  here\n"
-    ))
+    sections = dict(
+        split_sections(
+            "Doc Title\n"
+            "Status:  CURRENT\n"
+            "1.  First  section\n"
+            "●  alpha  item.  ●  beta  item.\n"
+            "2.  Second  section\n"
+            "body  text  here\n"
+        )
+    )
     assert sections["Header"] == "Doc Title Status: CURRENT"
     assert sections["1. First section"] == "- alpha item.\n- beta item."
     assert sections["2. Second section"] == "body text here"

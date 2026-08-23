@@ -14,8 +14,11 @@ from typing import Any
 from app import config
 
 _ORDER_TIMES = (
-    "booked_at", "pickup_window_start", "pickup_window_end",
-    "pickup_actual_at", "cancellation_requested_at",
+    "booked_at",
+    "pickup_window_start",
+    "pickup_window_end",
+    "pickup_actual_at",
+    "cancellation_requested_at",
 )
 _TICKET_TIMES = ("created_at", "last_customer_message_at")
 

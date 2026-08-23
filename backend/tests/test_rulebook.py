@@ -33,10 +33,7 @@ def raw():
 def test_no_condition_references_a_specific_record():
     """The invariant that separates a rulebook from hardcoded answers."""
     for rule in load().rules:
-        assert not any(
-            token in str(rule.when)
-            for token in ("ORD-", "TKT-", "ACCT-")
-        ), rule.id
+        assert not any(token in str(rule.when) for token in ("ORD-", "TKT-", "ACCT-")), rule.id
 
 
 def test_a_leaked_record_id_in_a_condition_is_rejected(raw):
@@ -98,8 +95,11 @@ def test_a_missing_tier_two_sla_default_is_rejected(raw):
 def test_every_entry_carries_provenance():
     book = load()
     sourced = (
-        list(book.rules) + list(book.constraints) + list(book.severity_rules)
-        + list(book.known_issues) + list(book.product_facts)
+        list(book.rules)
+        + list(book.constraints)
+        + list(book.severity_rules)
+        + list(book.known_issues)
+        + list(book.product_facts)
     )
     for entry in sourced:
         assert entry.source.doc, entry.id
@@ -153,7 +153,7 @@ def test_a_fictional_fifth_account_needs_no_code_change(raw, now):
                 "doc": "07_OrionFreight_Agreement",
                 "section": "2. Cancellation",
                 "quote": "OrionFreight may cancel a BOOKED shipment within two hours of "
-                         "booking with no fee. This clause replaces the standard fee.",
+                "booking with no fee. This clause replaces the standard fee.",
             },
         }
     )

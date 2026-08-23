@@ -13,9 +13,7 @@ from app.repo.db import connect
 def get(principal: Principal, account_id: str) -> dict[str, Any]:
     assert_account_access(principal, account_id, resource=f"account {account_id}")
     with connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM accounts WHERE account_id = ?", (account_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM accounts WHERE account_id = ?", (account_id,)).fetchone()
     if row is None:
         raise NotFound(f"no such account: {account_id}")
     return _hydrate.account(row)

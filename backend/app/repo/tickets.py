@@ -48,9 +48,7 @@ def search(
 
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     with connect() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM tickets{where} ORDER BY created_at DESC", tuple(params)
-        )
+        rows = conn.execute(f"SELECT * FROM tickets{where} ORDER BY created_at DESC", tuple(params))
         return [_hydrate.ticket(row) for row in rows]
 
 

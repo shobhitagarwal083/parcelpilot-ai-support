@@ -84,8 +84,8 @@ def test_n2_no_path_from_the_agent_package_reaches_execution():
             if token in source:
                 offenders.append(f"{path.relative_to(config.BACKEND_DIR)}: {token}")
 
-    assert not offenders, (
-        "the agent must not be able to execute an action:\n  " + "\n  ".join(offenders)
+    assert not offenders, "the agent must not be able to execute an action:\n  " + "\n  ".join(
+        offenders
     )
 
 
@@ -96,7 +96,8 @@ def test_n2_execution_lives_behind_the_api_not_a_tool():
     from app.repo import actions as store
 
     executors = {
-        name for name, fn in vars(store).items()
+        name
+        for name, fn in vars(store).items()
         if inspect.isfunction(fn) and name in ("confirm", "reject", "_apply")
     }
     assert executors == {"confirm", "reject", "_apply"}
@@ -138,7 +139,7 @@ def test_n4_capability_is_rechecked_at_confirmation_not_only_at_proposal(rohit, 
 def test_n5_the_threshold_comes_from_the_sop(rohit):
     assert actions.approval_threshold_inr() == Decimal("1000")
 
-    assert propose_credit(rohit, 1000).status == "PENDING"       # "above INR 1,000"
+    assert propose_credit(rohit, 1000).status == "PENDING"  # "above INR 1,000"
     assert propose_credit(rohit, 1000.01).status == "NEEDS_APPROVAL"
     assert propose_credit(rohit, 300).status == "PENDING"
 
@@ -218,9 +219,7 @@ def test_a_customer_sees_only_their_own_pending_actions(rohit):
 
 def test_an_unknown_action_type_is_rejected(rohit):
     with pytest.raises(actions.ActionError, match="unknown action type"):
-        actions.propose(
-            rohit, account_id="ACCT-001", action_type="delete_everything", payload={}
-        )
+        actions.propose(rohit, account_id="ACCT-001", action_type="delete_everything", payload={})
 
 
 def test_the_proposal_carries_the_decision_that_justified_it(rohit, now):

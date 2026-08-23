@@ -26,25 +26,52 @@ WORKBOOK_NAME = "ParcelPilot_Assessment_Data.xlsx"
 
 EXPECTED_COLUMNS = {
     "accounts": [
-        "account_id", "account_name", "plan", "status", "csm",
-        "contract_file", "premium_support", "notes",
+        "account_id",
+        "account_name",
+        "plan",
+        "status",
+        "csm",
+        "contract_file",
+        "premium_support",
+        "notes",
     ],
     "orders": [
-        "order_id", "account_id", "carrier", "status", "booked_at",
-        "pickup_window_start", "pickup_window_end", "pickup_actual_at",
-        "shipment_fee_inr", "carrier_fault", "customer_fault",
-        "cancellation_requested_at", "notes",
+        "order_id",
+        "account_id",
+        "carrier",
+        "status",
+        "booked_at",
+        "pickup_window_start",
+        "pickup_window_end",
+        "pickup_actual_at",
+        "shipment_fee_inr",
+        "carrier_fault",
+        "customer_fault",
+        "cancellation_requested_at",
+        "notes",
     ],
     "tickets": [
-        "ticket_id", "account_id", "created_at", "status", "subject",
-        "description", "channel", "assigned_to", "last_customer_message_at",
+        "ticket_id",
+        "account_id",
+        "created_at",
+        "status",
+        "subject",
+        "description",
+        "channel",
+        "assigned_to",
+        "last_customer_message_at",
         "historical_resolution",
     ],
 }
 
 TIMESTAMP_COLUMNS = {
-    "booked_at", "pickup_window_start", "pickup_window_end", "pickup_actual_at",
-    "cancellation_requested_at", "created_at", "last_customer_message_at",
+    "booked_at",
+    "pickup_window_start",
+    "pickup_window_end",
+    "pickup_actual_at",
+    "cancellation_requested_at",
+    "created_at",
+    "last_customer_message_at",
 }
 
 SCHEMA = """
@@ -187,8 +214,7 @@ def ingest_structured(source_dir: Path | None = None, db_path: Path | None = Non
         for name, rows in tables.items():
             columns = EXPECTED_COLUMNS[name]
             conn.executemany(
-                f"INSERT INTO {name} ({','.join(columns)}) "
-                f"VALUES ({','.join('?' * len(columns))})",
+                f"INSERT INTO {name} ({','.join(columns)}) VALUES ({','.join('?' * len(columns))})",
                 [tuple(row[c] for c in columns) for row in rows],
             )
 
