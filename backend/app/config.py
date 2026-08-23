@@ -105,9 +105,11 @@ PROVIDERS: dict[str, dict[str, object]] = {
         # tier. `*-latest` aliases are excluded too -- they drift, and a reviewer
         # running this repo weeks from now should get the model we tested.
         #
-        # Ordered. Unlike OpenRouter, Google has no server-side fallback array,
-        # so provider.py walks this list itself.
-        "models": ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
+        # Ordered by the bake-off, not by version number. flash-lite completed
+        # the chain 5/5 where 3.5-flash managed 1/4 and was the slower of the
+        # two under load -- the newer, larger-sounding model is the worse fit
+        # for a job that is mostly routing.
+        "models": ["gemini-3.1-flash-lite", "gemini-3.5-flash"],
         "console": "https://aistudio.google.com/apikey",
     },
     "groq": {
