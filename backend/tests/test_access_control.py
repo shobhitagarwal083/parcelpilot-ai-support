@@ -11,6 +11,8 @@ have, and the intersection with the session's own scope denies it anyway.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.auth import principals
@@ -181,3 +183,46 @@ def test_personas_cover_both_user_contexts():
     assert sum(1 for p in everyone if p.kind == "internal") == 2
     assert all(p.account_ids or p.reads_any_account for p in everyone)
     assert not any(p.can(READ_DEPRECATED) for p in everyone if p.kind == "customer")
+
+
+# ------------------------------------------------- what a principal may be told
+
+
+def test_a_customer_is_not_sent_the_internal_caveat_text(now):
+    """The redaction must happen server-side, not in the browser.
+
+    KI-211 is a caveat a customer genuinely needs -- their parcel may already
+    have been collected -- carrying an internal tracker id they should not see.
+    `Caveat` ships both registers, so it would be easy to send both and let the
+    UI pick. That puts the secret in the response body and the enforcement in
+    the client, which is the same mistake as enforcing access control in the
+    prompt.
+    """
+    from app.agent.tools.evaluate import evaluate_cancellation
+
+    customer = principals.get("cust-northstar")
+    internal = principals.get("staff-rohit")
+
+    # ORD-1001 is SwiftShip and BOOKED, so KI-211 attaches.
+    theirs = evaluate_cancellation(customer, as_of=now, order_id="ORD-1001")
+    ours = evaluate_cancellation(internal, as_of=now, order_id="ORD-1001")
+
+    assert ours["caveats"], "the internal answer should carry the known-issue caveat"
+    assert theirs["caveats"], "the customer still needs to be warned, just differently"
+
+    customer_payload = json.dumps(theirs)
+    assert "KI-211" not in customer_payload
+    assert "KI-211" in json.dumps(ours)
+
+    # The outcome itself is identical -- only the disclosure differs.
+    assert theirs["outcome"] == ours["outcome"]
+    assert theirs["amount_inr"] == ours["amount_inr"]
+    assert theirs["overrides"] == ours["overrides"]
+
+
+def test_redaction_leaves_internal_principals_untouched(now):
+    from app.agent.tools.evaluate import evaluate_cancellation
+
+    for persona in ("staff-rohit", "staff-priya"):
+        decision = evaluate_cancellation(principals.get(persona), as_of=now, order_id="ORD-1001")
+        assert any(c["issue_id"] for c in decision["caveats"])

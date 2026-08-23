@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from app.agent.tools.registry import _object, tool
+from app.auth import disclosure
 from app.auth.principals import Principal
 from app.auth.scope import resolve_subject_account
 from app.policy import cancellation, service_credit, sla
@@ -43,7 +44,7 @@ def evaluate_cancellation(
     order = orders.get(principal, order_id)
     history = tickets.resolution_history(principal, order["account_id"])
     decision = cancellation.evaluate(order=order, as_of=as_of, history=history)
-    return decision.to_dict()
+    return disclosure.for_principal(decision.to_dict(), principal)
 
 
 @tool(
@@ -99,7 +100,7 @@ def evaluate_service_credit(
             order_id=order_id,
             history=tickets.resolution_history(principal, order["account_id"]),
         )
-        return decision.to_dict()
+        return disclosure.for_principal(decision.to_dict(), principal)
 
     subject = resolve_subject_account(principal, account_id)
     decision = service_credit.evaluate(
@@ -110,7 +111,7 @@ def evaluate_service_credit(
         shipment_fee_inr=shipment_fee_inr,
         as_of=as_of,
     )
-    return decision.to_dict()
+    return disclosure.for_principal(decision.to_dict(), principal)
 
 
 @tool(
@@ -130,4 +131,5 @@ def evaluate_service_credit(
 def evaluate_sla(principal: Principal, *, as_of: datetime, ticket_id: str) -> dict[str, Any]:
     ticket = tickets.get(principal, ticket_id)
     account = accounts.get(principal, ticket["account_id"])
-    return sla.evaluate(ticket=ticket, account=account, as_of=as_of).to_dict()
+    decision = sla.evaluate(ticket=ticket, account=account, as_of=as_of)
+    return disclosure.for_principal(decision.to_dict(), principal)
