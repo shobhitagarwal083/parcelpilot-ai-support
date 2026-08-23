@@ -23,6 +23,28 @@ from app.auth.scope import resolve_subject_account
 from app.policy import cancellation, service_credit, sla
 from app.repo import accounts, orders, tickets
 
+#: Appended to every decision tool's description.
+#:
+#: The system prompt already asks for this and the model ignored it 0/4 times --
+#: it gave the right verdict and dropped the reasoning. Tool descriptions are
+#: read at the moment of use and have already proven more effective on this
+#: model than prompt-level guidance (see evaluate_service_credit's note on
+#: stated facts). This is the same lever applied to the same class of problem.
+#:
+#: It matters because the overridden rule *is* the explanation. "No fee, because
+#: your agreement says so" is a weaker answer than "no fee -- the standard SOP
+#: would have charged 250 rupees, but your agreement replaces it", and the brief's
+#: own example question asks the assistant to explain why.
+DISCLOSE = (
+    "\nWHEN THE RESULT HAS `overrides`, YOUR ANSWER MUST SAY SO: name the document that won, "
+    "the rule it replaced or outranked, and what that rule would have said. This is the "
+    "explanation the user asked for -- omitting it leaves them unable to tell a correct answer "
+    "from a lucky one.\n"
+    "WHEN THE RESULT HAS `contradicts`, SAY PLAINLY THAT THE EARLIER ANSWER WAS WRONG, naming "
+    "the ticket. Do not repeat it and do not quietly ignore it -- the customer was told "
+    "something incorrect and is entitled to know it has been corrected."
+)
+
 
 @tool(
     name="evaluate_cancellation",
@@ -30,7 +52,7 @@ from app.repo import accounts, orders, tickets
         "Decide whether an order can be cancelled and what fee applies. Resolves the customer "
         "agreement against the SOP deterministically and returns the outcome with citations, "
         "any rules it overrode, contradicted past guidance, and known-issue caveats. Use this "
-        "rather than reading a fee out of a document."
+        "rather than reading a fee out of a document." + DISCLOSE
     ),
     parameters=_object(
         {"order_id": {"type": "string", "description": "e.g. ORD-1001."}},
@@ -59,7 +81,7 @@ def evaluate_cancellation(
         "that. Do NOT look up one of their orders and answer about its delay instead: a real "
         "order with a longer delay gives a different verdict, and reporting it as though it "
         "answered their question is wrong even though every number in it is right. "
-        "Pass order_id only when the user asked about that specific order."
+        "Pass order_id only when the user asked about that specific order." + DISCLOSE
     ),
     parameters=_object(
         {
@@ -125,7 +147,7 @@ def evaluate_service_credit(
         "Decide the first-response target for a ticket and whether it has been met. The clock "
         "runs from when the ticket was created, and coverage comes from the governing rule -- "
         "some targets are 24x7 and some only run during business hours, which means a ticket "
-        "raised at a weekend may not have started its clock at all."
+        "raised at a weekend may not have started its clock at all." + DISCLOSE
     ),
     parameters=_object(
         {"ticket_id": {"type": "string", "description": "e.g. TKT-501."}},
