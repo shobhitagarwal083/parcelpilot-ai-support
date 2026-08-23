@@ -89,9 +89,10 @@ class Completed:
         return self.finish_reason in ("content_filter", "refusal")
 
 
-def _headers() -> dict[str, str]:
-    settings = config.provider_settings()
-    key = config.api_key()
+def _headers(provider: str | None = None) -> dict[str, str]:
+    name = provider or config.PROVIDER
+    settings = config.provider_settings(name)
+    key = config.api_key(name)
     if not key:
         raise MissingCredentials(
             f"{settings['key_env']} is not set. Add it to .env (get one at "
@@ -102,8 +103,8 @@ def _headers() -> dict[str, str]:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
-    if config.PROVIDER == "openrouter":
-        # OpenRouter attributes free-tier usage with these; Google ignores them.
+    if name == "openrouter":
+        # OpenRouter attributes free-tier usage with these; others ignore them.
         headers["HTTP-Referer"] = "https://github.com/parcelpilot-ai-support"
         headers["X-Title"] = "ParcelPilot AI Support"
     return headers
@@ -135,39 +136,56 @@ async def stream_completion(
     model: str | None = None,
     timeout: float = 120.0,
 ) -> AsyncIterator[TextDelta | Completed]:
-    """Try each configured model in order until one answers.
+    """Try each configured model in order until one answers, across vendors.
 
     Failover lives here rather than in a provider-specific request field.
     OpenRouter accepts an ordered `models` array and fails over server-side;
     Google does not, so relying on that would have made the behaviour vanish
-    the moment the provider changed. Walking the list ourselves costs one round
-    trip on failure and works identically on both -- and, unlike a vendor
-    feature, it can be tested without a network.
+    the moment the provider changed.
+
+    D-20: it crosses vendors, and that is the point. Free quota is metered per
+    project, not per model -- when Google answers RESOURCE_EXHAUSTED every
+    Gemini model is exhausted at the same instant, so falling back from one to
+    another fails for exactly the reason the first one did. A second vendor has
+    independent quota, which is the only kind of fallback that survives the
+    case it exists for.
 
     ⚠️ Failover only applies *before* the first chunk is yielded. Once the
-    client has seen output, retrying on another model would splice two different
+    client has seen output, retrying elsewhere would splice two different
     answers into one turn, which is worse than the error.
     """
     if model is not None:
         # A pinned model means the caller is measuring that model. Failing over
         # would silently substitute a different one -- exactly what the bake-off
         # must not do.
-        async for chunk in _stream_once(messages, tools, model=model, timeout=timeout):
+        async for chunk in _stream_once(
+            messages, tools, provider=config.PROVIDER, model=model, timeout=timeout
+        ):
             yield chunk
         return
 
-    candidates = config.provider_models()
+    candidates = config.candidates()
+    if not candidates:
+        # No provider has a key. Report the active one, since that is the
+        # variable the operator most likely meant to set.
+        _headers()
+        raise ProviderError("no model was configured to try")
+
     last_error: ProviderError | None = None
 
     for candidate in candidates:
         produced = False
         try:
-            async for chunk in _stream_once(messages, tools, model=candidate, timeout=timeout):
+            async for chunk in _stream_once(
+                messages,
+                tools,
+                provider=candidate.provider,
+                model=candidate.model,
+                timeout=timeout,
+            ):
                 produced = True
                 yield chunk
             return
-        except MissingCredentials:
-            raise  # another model will not fix an absent key
         except ProviderError as exc:
             if produced:
                 raise
@@ -180,10 +198,11 @@ async def _stream_once(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     *,
+    provider: str,
     model: str | None,
     timeout: float,
 ) -> AsyncIterator[TextDelta | Completed]:
-    """One request to one model.
+    """One request to one model at one provider.
 
     Streaming is not decoration. Tool-call events reach the client the moment
     the model emits them, so the trace renders while the model is still working
@@ -201,8 +220,8 @@ async def _stream_once(
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream(
             "POST",
-            f"{config.provider_base_url()}/chat/completions",
-            headers=_headers(),
+            f"{config.provider_base_url(provider)}/chat/completions",
+            headers=_headers(provider),
             json=payload,
         ) as response:
             if response.status_code >= 400:

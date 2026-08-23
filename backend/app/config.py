@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -109,6 +110,24 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "models": ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
         "console": "https://aistudio.google.com/apikey",
     },
+    "groq": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_env": "GROQ_API_KEY",
+        # Verified against the live catalogue on 2026-08-23, then probed: both
+        # emit a real tool call 3/3 in ~0.7s, which is two to four times faster
+        # than anything free measured on Google.
+        #
+        # Excluded: qwen/qwen3.6-27b called the tool 0/3 and returned a hard 400
+        # ("Failed to call a function") on one attempt. The Llama models that
+        # would be the obvious pick are not in this catalogue at all.
+        #
+        # A note on method, because it has now been earned twice: both the
+        # Gemini and Groq model lists were first written from memory, and both
+        # were wrong -- a 404 and a non-tool-caller the first time, two models
+        # that do not exist the second. Read the catalogue, then probe it.
+        "models": ["openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+        "console": "https://console.groq.com/keys",
+    },
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
         "key_env": "OPENROUTER_API_KEY",
@@ -121,6 +140,17 @@ PROVIDERS: dict[str, dict[str, object]] = {
 }
 
 PROVIDER = os.environ.get("MODEL_PROVIDER", "google").strip().lower()
+
+#: Providers to fall back to, in order, once the primary is exhausted.
+#:
+#: D-20. Walking a single provider's model list is thin protection, because free
+#: quota is metered per project rather than per model: when Google answers
+#: RESOURCE_EXHAUSTED, every Gemini model is exhausted at the same instant, and
+#: falling back from one to another fails for precisely the reason the first did.
+#: A second vendor has independent quota, so this is the failover that actually
+#: survives the case it exists for. Providers without a key configured are
+#: skipped, so an unused entry costs nothing.
+FAILOVER_PROVIDERS = ["google", "groq", "openrouter"]
 
 MAX_TOKENS = 4096
 
@@ -153,6 +183,31 @@ def provider_models(name: str | None = None) -> list[str]:
 
 def primary_model(name: str | None = None) -> str:
     return provider_models(name)[0]
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One (provider, model) pair to try. Ordered by `candidates()`."""
+
+    provider: str
+    model: str
+
+
+def candidates() -> list[Candidate]:
+    """Every model worth trying, best first, across providers.
+
+    The active provider's models come first; the remaining providers follow in
+    `FAILOVER_PROVIDERS` order. A provider with no key configured is skipped
+    rather than attempted and failed, so leaving an entry in the table costs
+    nothing and adding a key is the whole of enabling it.
+    """
+    order = [PROVIDER] + [name for name in FAILOVER_PROVIDERS if name != PROVIDER]
+    found: list[Candidate] = []
+    for name in order:
+        if name not in PROVIDERS or not api_key(name):
+            continue
+        found.extend(Candidate(provider=name, model=model) for model in provider_models(name))
+    return found
 
 
 def api_key(name: str | None = None) -> str | None:

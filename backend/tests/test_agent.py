@@ -13,6 +13,7 @@ import pytest
 
 from app import config
 from app.agent import loop, prompts, provider
+from app.agent import provider as provider_module
 from app.agent.tools import REGISTRY, parse_arguments
 from app.auth import principals
 
@@ -196,23 +197,57 @@ def test_a_missing_key_names_the_variable_and_what_still_works(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_failover_tries_the_next_model_when_the_first_will_not_serve(monkeypatch):
-    """Capacity failures are what this exists for; both providers hit them."""
-    attempted: list[str] = []
+async def test_failover_tries_the_next_candidate_when_the_first_will_not_serve(monkeypatch):
+    """Capacity failures are what this exists for; every free tier hits them."""
+    attempted: list[tuple[str, str]] = []
+    candidates = config.candidates()
+    if len(candidates) < 2:
+        pytest.skip("needs at least two configured candidates")
 
-    async def flaky(messages, tools, *, model, timeout):
-        attempted.append(model)
-        if model == config.provider_models()[0]:
-            raise provider.ProviderError("provider returned 429: rate limited")
-        yield provider.TextDelta("ok")
-        yield provider.Completed(finish_reason="stop", text="ok")
+    async def flaky(messages, tools, *, provider, model, timeout):
+        attempted.append((provider, model))
+        if (provider, model) == (candidates[0].provider, candidates[0].model):
+            raise provider_module.ProviderError("provider returned 429: rate limited")
+        yield provider_module.TextDelta("ok")
+        yield provider_module.Completed(finish_reason="stop", text="ok")
 
     monkeypatch.setattr(provider, "_stream_once", flaky)
 
     chunks = [c async for c in provider.stream_completion([], [])]
 
-    assert attempted == config.provider_models()
+    assert attempted[0] == (candidates[0].provider, candidates[0].model)
+    assert len(attempted) == 2
     assert any(isinstance(c, provider.Completed) for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_failover_crosses_vendors_not_just_models(monkeypatch):
+    """D-20: the case failover exists for is the one a single vendor cannot cover.
+
+    Free quota is metered per project, so when a provider answers
+    RESOURCE_EXHAUSTED every one of its models is exhausted at the same instant.
+    A chain that never leaves that vendor fails for the reason the first attempt
+    failed.
+    """
+    monkeypatch.setattr(config, "PROVIDER", "google")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-google")
+    monkeypatch.setenv("GROQ_API_KEY", "test-groq")
+
+    providers_tried = [c.provider for c in config.candidates()]
+
+    assert providers_tried[0] == "google"
+    assert "groq" in providers_tried, "a second vendor must be reachable"
+
+
+@pytest.mark.asyncio
+async def test_a_provider_without_a_key_is_skipped_not_attempted(monkeypatch):
+    """An unused entry in the table should cost nothing."""
+    monkeypatch.setattr(config, "PROVIDER", "google")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-google")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    assert {c.provider for c in config.candidates()} == {"google"}
 
 
 @pytest.mark.asyncio
@@ -220,14 +255,14 @@ async def test_failover_does_not_splice_two_answers_together(monkeypatch):
     """Once the client has seen output, retrying elsewhere would join half of
     one answer to half of another -- worse than surfacing the error."""
 
-    async def dies_mid_stream(messages, tools, *, model, timeout):
-        yield provider.TextDelta("the fee is ")
-        raise provider.ProviderError("provider returned 500: upstream died")
+    async def dies_mid_stream(messages, tools, *, provider, model, timeout):
+        yield provider_module.TextDelta("the fee is ")
+        raise provider_module.ProviderError("provider returned 500: upstream died")
 
     monkeypatch.setattr(provider, "_stream_once", dies_mid_stream)
 
     seen = []
-    with pytest.raises(provider.ProviderError):
+    with pytest.raises(provider_module.ProviderError):
         async for chunk in provider.stream_completion([], []):
             seen.append(chunk)
 
@@ -239,14 +274,14 @@ async def test_a_pinned_model_never_fails_over(monkeypatch):
     """Substituting a different model would invalidate the bake-off silently."""
     attempted: list[str] = []
 
-    async def always_fails(messages, tools, *, model, timeout):
+    async def always_fails(messages, tools, *, provider, model, timeout):
         attempted.append(model)
-        raise provider.ProviderError("provider returned 429: rate limited")
+        raise provider_module.ProviderError("provider returned 429: rate limited")
         yield  # pragma: no cover - unreachable, makes this a generator
 
     monkeypatch.setattr(provider, "_stream_once", always_fails)
 
-    with pytest.raises(provider.ProviderError):
+    with pytest.raises(provider_module.ProviderError):
         async for _ in provider.stream_completion([], [], model="pinned-model"):
             pass
 
