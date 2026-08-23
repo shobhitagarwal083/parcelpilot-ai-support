@@ -22,6 +22,109 @@ That is a precedence rule, not a reading-comprehension problem.
 
 ---
 
+## The system in one picture
+
+```mermaid
+flowchart TB
+    subgraph browser["Browser · React, served by the API itself"]
+        chatui["Chat<br/>persona rail · live tool trace<br/>decision cards"]
+        boardui["Triage board"]
+    end
+
+    subgraph api["FastAPI · one container, one origin, no CORS"]
+        chatep["POST /api/chat · SSE<br/>principal resolved from the header,<br/>never a body field or a parameter"]
+        sigep["GET /api/signals"]
+        confirmep["POST /api/actions/…/confirm<br/>no tool is bound to this endpoint"]
+    end
+
+    subgraph agent["agent/ · the only place a model is reached"]
+        loop["streaming loop<br/>max 6 tool rounds · 12 calls per turn<br/>emits each call as it happens"]
+        provider["provider.py<br/>Google · Groq · OpenRouter failover"]
+    end
+
+    model(["LLM<br/>routes and narrates<br/>decides nothing"])
+
+    tools["tool layer · 11 tools, principal injected here<br/><br/>read · get_order · get_ticket · get_account · list_orders<br/>search · search_policy_documents · search_tickets<br/>evaluate · evaluate_cancellation · _service_credit · _sla<br/>act · propose_action · detect_issues"]
+
+    ops["ops/ · 7 detectors<br/>scans every record in scope,<br/>without being asked"]
+
+    subgraph core["decision core · no model call exists below this line"]
+        engine["rule engine · business calendar · known-issue caveats<br/>filter by scope → sort by authority tier<br/>first match wins, every override recorded"]
+        repos["repositories<br/>principal first at every entry point<br/>disclosure redacted on the way out"]
+        retrieval["retrieval<br/>authority-weighted BM25<br/>deprecated documents excluded"]
+    end
+
+    rulebook[("rulebook.yaml<br/>every rule, threshold, amount")]
+    docs[("documents.yaml + chunks.json<br/>tier · status · dates · scope")]
+    db[("SQLite<br/>accounts · orders · tickets<br/>pending_actions · audit_log")]
+    snapshot["config.SNAPSHOT_AT<br/>Sun 16 Aug 2026, 11:00 IST<br/>injected, never read from the clock"]
+
+    chatui <-->|"question down · tokens and events up"| chatep
+    chatep --> loop
+    loop <-->|"completions and tool calls"| provider
+    provider <--> model
+    loop <==>|"calls a tool, gets a finished Decision"| tools
+
+    tools <==>|"asks for the verdict, never computes one"| engine
+    tools --> repos
+    tools --> retrieval
+    tools -.->|"propose_action writes a PENDING row and stops"| db
+
+    engine -.-> rulebook
+    engine -.-> snapshot
+    retrieval -.-> docs
+    repos --> db
+
+    boardui --> sigep
+    sigep --> ops
+    ops --> engine
+    ops --> repos
+
+    chatui -->|"a human clicks Confirm — the model is not in this path"| confirmep
+    boardui --> confirmep
+    confirmep -->|"re-checks capability, applies the effect, writes audit_log"| db
+
+    classDef narrator fill:#fdece0,stroke:#c2410c,color:#3a1a08
+    classDef deterministic fill:#e8f1ec,stroke:#2f6f4f,color:#10281c
+    classDef gate fill:#fdeaea,stroke:#b91c1c,color:#3f1010
+    classDef store fill:#eef0f4,stroke:#4b5563,color:#111827
+    class model narrator
+    class engine,repos,retrieval,ops deterministic
+    class confirmep gate
+    class rulebook,docs,db,snapshot store
+```
+
+Three things in that picture are the whole design, and each is enforced by
+something other than good intentions.
+
+**The model hangs off the side of the spine, and reaches down exactly one
+level.** It can call tools. It cannot reach the rule engine, the calendar, the
+repositories or the rulebook, because nothing below the tool layer is exposed to
+it. The two thick edges are drawn both ways deliberately: a call goes down and a
+`Decision` comes back already finished — outcome, amount, citations, overrides,
+caveats — and the model's remaining job is to write a sentence about it.
+
+**The principal enters at the API and travels down, never up.** It is resolved
+from the request header and injected server-side, so a tool argument naming
+someone else's account is intersected with the session's scope rather than
+believed. Every repository entry point takes it first, and a test walks the
+repository layer asserting there is no code path that reaches data without one.
+
+**The only lines into `confirm` come from the browser.** `propose_action` writes
+a `PENDING` row and stops; the endpoint that executes has no tool bound to it,
+so there is no sequence of model outputs that reaches execution. Capability is
+re-checked at confirm rather than trusted from proposal time, because an
+approval requirement enforced only at proposal is not an approval requirement.
+
+Two paths on that diagram never touch the model at all, and both are deliberate.
+The detectors on the right run from a plain GET: they scan every record in scope
+and rank what they find without anyone asking, which is the proactive half of
+the product. And the interface renders citations, overrides and proposed actions
+out of the `Decision` events rather than out of the model's prose, so a citation
+the model forgets to mention still appears on screen.
+
+---
+
 ## Agent design
 
 ### The loop
