@@ -1,8 +1,10 @@
 """The provider boundary. Nothing else in the codebase imports an LLM client.
 
-D-14: the system runs on OpenRouter's free tier, primary and fallback sent as a
-model array in one request so a capacity failure on one fails over rather than
-failing the demo.
+D-19: the system runs on Google AI Studio (Gemini) through its OpenAI-compatible
+endpoint, with OpenRouter kept configured as an alternative. Both speak the same
+chat-completions shape, so one adapter reaches either; `MODEL_PROVIDER` chooses.
+Failover walks the configured model list here rather than relying on a vendor
+field, so the behaviour survives changing provider.
 
 The boundary earns its place beyond portability. Every correctness-bearing
 component -- the rule engine, the calendar, retrieval, access control -- contains
@@ -37,6 +39,28 @@ class ToolCall:
     id: str
     name: str = ""
     arguments: str = ""
+    #: Opaque provider state attached to this call, echoed back verbatim on the
+    #: next request. Gemini 3.x returns a `thought_signature` here and rejects
+    #: the follow-up turn with a 400 if it is missing, so dropping it breaks
+    #: every multi-step chain at the second call -- the first tool runs, then
+    #: the turn dies. Nothing here interprets it; it is carried, not read.
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def as_message_part(self) -> dict[str, Any]:
+        """Render this call for the assistant message that replays it.
+
+        Built here rather than in the loop so that vendor-specific fields stay
+        behind the provider boundary. The loop knows it is sending back a tool
+        call; it does not know what any provider needs attached to one.
+        """
+        part: dict[str, Any] = {
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.name, "arguments": self.arguments or "{}"},
+        }
+        if self.extra:
+            part["extra_content"] = self.extra
+        return part
 
 
 @dataclass
@@ -66,19 +90,23 @@ class Completed:
 
 
 def _headers() -> dict[str, str]:
-    key = config.openrouter_api_key()
+    settings = config.provider_settings()
+    key = config.api_key()
     if not key:
         raise MissingCredentials(
-            "OPENROUTER_API_KEY is not set. Copy .env.example to .env and add a key -- "
-            "the policy engine, retrieval and access control all run and test without one."
+            f"{settings['key_env']} is not set. Add it to .env (get one at "
+            f"{settings['console']}) -- the policy engine, retrieval and access control "
+            "all run and test without one."
         )
-    return {
+    headers = {
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
-        # OpenRouter attributes free-tier usage with these.
-        "HTTP-Referer": "https://github.com/parcelpilot-ai-support",
-        "X-Title": "ParcelPilot AI Support",
     }
+    if config.PROVIDER == "openrouter":
+        # OpenRouter attributes free-tier usage with these; Google ignores them.
+        headers["HTTP-Referer"] = "https://github.com/parcelpilot-ai-support"
+        headers["X-Title"] = "ParcelPilot AI Support"
+    return headers
 
 
 def build_payload(
@@ -88,9 +116,8 @@ def build_payload(
     model: str | None = None,
     stream: bool = True,
 ) -> dict[str, Any]:
-    primary = model or config.PRIMARY_MODEL
     payload: dict[str, Any] = {
-        "model": primary,
+        "model": model or config.primary_model(),
         "messages": messages,
         "max_tokens": config.MAX_TOKENS,
         "stream": stream,
@@ -98,10 +125,6 @@ def build_payload(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
-    if model is None and config.FALLBACK_MODELS:
-        # OpenRouter accepts an ordered fallback array in one request, so a
-        # free-tier capacity failure is invisible rather than fatal.
-        payload["models"] = [primary, *config.FALLBACK_MODELS]
     return payload
 
 
@@ -112,7 +135,55 @@ async def stream_completion(
     model: str | None = None,
     timeout: float = 120.0,
 ) -> AsyncIterator[TextDelta | Completed]:
-    """Yield text deltas as they arrive, then one Completed at the end.
+    """Try each configured model in order until one answers.
+
+    Failover lives here rather than in a provider-specific request field.
+    OpenRouter accepts an ordered `models` array and fails over server-side;
+    Google does not, so relying on that would have made the behaviour vanish
+    the moment the provider changed. Walking the list ourselves costs one round
+    trip on failure and works identically on both -- and, unlike a vendor
+    feature, it can be tested without a network.
+
+    ⚠️ Failover only applies *before* the first chunk is yielded. Once the
+    client has seen output, retrying on another model would splice two different
+    answers into one turn, which is worse than the error.
+    """
+    if model is not None:
+        # A pinned model means the caller is measuring that model. Failing over
+        # would silently substitute a different one -- exactly what the bake-off
+        # must not do.
+        async for chunk in _stream_once(messages, tools, model=model, timeout=timeout):
+            yield chunk
+        return
+
+    candidates = config.provider_models()
+    last_error: ProviderError | None = None
+
+    for candidate in candidates:
+        produced = False
+        try:
+            async for chunk in _stream_once(messages, tools, model=candidate, timeout=timeout):
+                produced = True
+                yield chunk
+            return
+        except MissingCredentials:
+            raise  # another model will not fix an absent key
+        except ProviderError as exc:
+            if produced:
+                raise
+            last_error = exc
+
+    raise last_error or ProviderError("no model was configured to try")
+
+
+async def _stream_once(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    *,
+    model: str | None,
+    timeout: float,
+) -> AsyncIterator[TextDelta | Completed]:
+    """One request to one model.
 
     Streaming is not decoration. Tool-call events reach the client the moment
     the model emits them, so the trace renders while the model is still working
@@ -130,7 +201,7 @@ async def stream_completion(
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream(
             "POST",
-            f"{config.OPENROUTER_BASE_URL}/chat/completions",
+            f"{config.provider_base_url()}/chat/completions",
             headers=_headers(),
             json=payload,
         ) as response:
@@ -186,6 +257,8 @@ def _accumulate(calls: dict[int, ToolCall], fragment: dict[str, Any]) -> None:
     call = calls.setdefault(index, ToolCall(id=fragment.get("id") or f"call_{index}"))
     if fragment.get("id"):
         call.id = fragment["id"]
+    if extra := fragment.get("extra_content"):
+        call.extra = extra
     function = fragment.get("function") or {}
     if function.get("name"):
         call.name = function["name"]

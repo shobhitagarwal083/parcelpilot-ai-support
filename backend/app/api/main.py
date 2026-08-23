@@ -30,7 +30,12 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "snapshot_at": config.SNAPSHOT_AT.isoformat(),
-            "model": config.PRIMARY_MODEL,
+            "provider": config.PROVIDER,
+            "model": config.primary_model(),
+            # Whether a key is present, never the key itself. Enough to diagnose
+            # a misconfigured deployment without putting a secret in a response
+            # any visitor can fetch.
+            "credentials": bool(config.api_key()),
         }
 
     return app

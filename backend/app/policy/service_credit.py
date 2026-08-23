@@ -24,6 +24,10 @@ DOMAIN = "service_credit"
 #: or customer fault is unknown." A null in any of these is not a `False`.
 REQUIRED_FACTS = ("hours_past_window_end", "carrier_fault", "customer_fault")
 
+#: The value of each fault fact most favourable to a claimant. Used *only* to
+#: test whether an unknown could change the answer -- never to decide one.
+BEST_CASE: dict[str, bool] = {"carrier_fault": True, "customer_fault": False}
+
 
 def hours_past_window_end(order: dict[str, Any], as_of: datetime) -> float | None:
     """How late a pickup is, measured to the actual pickup if one happened.
@@ -60,6 +64,28 @@ def evaluate(
     facts_used = {"account_id": account_id, "order_id": order_id, **facts}
 
     unknowns = [name for name in REQUIRED_FACTS if facts.get(name) is None]
+
+    # An unknown only blocks an answer when it could change it.
+    #
+    # SOP v4 section 3 forbids *promising a credit* under uncertainty. Declining
+    # one is the conservative direction, not the risky one -- so refusing to say
+    # "not eligible" because an immaterial fact is missing is over-caution that
+    # hides the correct answer. It bit the headline case: a LumenWorks pickup
+    # three hours late fails their four-hour threshold whatever the fault flags
+    # turn out to be, yet an unstated customer_fault forced `indeterminate`.
+    #
+    # The test is: resolve with every unknown set to the value most favourable to
+    # the claimant. If even that best case grants no credit, the real values
+    # cannot either, and the answer is knowable without establishing them. A
+    # missing duration is never immaterial -- there is no bound to assume.
+    if unknowns and facts["hours_past_window_end"] is not None:
+        best_case = {**facts, **{name: BEST_CASE[name] for name in unknowns}}
+        if (
+            engine.resolve(DOMAIN, best_case, account_id=account_id, as_of=as_of, book=book).winner
+            is None
+        ):
+            unknowns = []
+
     if unknowns:
         return Decision(
             domain=DOMAIN,

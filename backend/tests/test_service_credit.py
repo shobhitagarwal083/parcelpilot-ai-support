@@ -91,9 +91,9 @@ def test_s3_the_answer_cites_the_agreement_that_governs_the_account(now):
 @pytest.mark.parametrize(
     ("account_id", "fee", "expected"),
     [
-        ("ACCT-003", 1200.0, 120),   # S5  10% of the fee
-        ("ACCT-001", 4200.0, 420),   # S6  10% of the fee
-        ("ACCT-004", 6000.0, 500),   # S7  capped at INR 500, not 10% = INR 600
+        ("ACCT-003", 1200.0, 120),  # S5  10% of the fee
+        ("ACCT-001", 4200.0, 420),  # S6  10% of the fee
+        ("ACCT-004", 6000.0, 500),  # S7  capped at INR 500, not 10% = INR 600
     ],
 )
 def test_s5_s7_the_same_three_hour_delay_is_eligible_on_every_other_account(
@@ -159,9 +159,7 @@ def test_s11_a_credit_above_the_threshold_requires_manager_approval(now):
 def test_s11_the_threshold_comes_from_the_sop_not_an_invented_number(now):
     from app.knowledge.loader import load
 
-    constraint = next(
-        c for c in load().constraints if c.id == "approval.sop_v4.manager_required"
-    )
+    constraint = next(c for c in load().constraints if c.id == "approval.sop_v4.manager_required")
     assert constraint.amount_inr == 1000
     assert constraint.source.doc == "03_Cancellation_and_Service_Credit_SOP_v4"
     assert "above INR 1,000" in constraint.source.quote
@@ -176,3 +174,60 @@ def test_only_one_order_in_the_pack_has_carrier_fault(now):
         rows = conn.execute("SELECT order_id FROM orders WHERE carrier_fault = 1")
         faulted = [r[0] for r in rows]
     assert faulted == ["ORD-2002"]
+
+
+# ------------------------------------------- unknowns that cannot change the answer
+
+
+def test_an_immaterial_unknown_does_not_block_a_refusal(now):
+    """SOP v4 section 3 forbids *promising* a credit under uncertainty.
+
+    Declining one is the conservative direction, so refusing to say "not
+    eligible" because an irrelevant fact is missing is over-caution that hides
+    the right answer. A LumenWorks pickup three hours late fails their four-hour
+    threshold whatever customer_fault turns out to be.
+    """
+    decision = service_credit.evaluate(
+        account_id="ACCT-002",
+        hours_past_window_end=3,
+        carrier_fault=True,
+        customer_fault=None,
+        as_of=now,
+    )
+
+    assert decision.outcome == "ineligible"
+    assert decision.unknowns == []
+    assert not decision.requires_human
+
+
+def test_a_load_bearing_unknown_still_blocks(now):
+    """The same missing fact, where it *would* change the answer, still stops us.
+
+    Northstar falls under the SOP's two-hour threshold, so a three-hour delay
+    qualifies on timing -- and then customer_fault decides it.
+    """
+    decision = service_credit.evaluate(
+        account_id="ACCT-001",
+        hours_past_window_end=3,
+        carrier_fault=True,
+        customer_fault=None,
+        as_of=now,
+    )
+
+    assert decision.outcome == "indeterminate"
+    assert decision.unknowns == ["customer_fault"]
+    assert decision.requires_human
+
+
+def test_an_unknown_duration_is_never_immaterial(now):
+    """There is no bound to assume for a missing duration, so it always blocks."""
+    decision = service_credit.evaluate(
+        account_id="ACCT-002",
+        hours_past_window_end=None,
+        carrier_fault=True,
+        customer_fault=False,
+        as_of=now,
+    )
+
+    assert decision.outcome == "indeterminate"
+    assert "hours_past_window_end" in decision.unknowns

@@ -81,7 +81,7 @@ async def run(
                 "escalation",
                 {
                     "reason": "The assistant declined to answer this one. Routing it to a "
-                              "human colleague rather than guessing.",
+                    "human colleague rather than guessing.",
                 },
             )
             yield Event("done", {"usage": usage, "finish_reason": completed.finish_reason})
@@ -95,14 +95,9 @@ async def run(
             {
                 "role": "assistant",
                 "content": completed.text or None,
-                "tool_calls": [
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {"name": call.name, "arguments": call.arguments or "{}"},
-                    }
-                    for call in completed.tool_calls
-                ],
+                # Rendered by the provider, because some providers attach state
+                # to a tool call that has to come back verbatim on the next turn.
+                "tool_calls": [call.as_message_part() for call in completed.tool_calls],
             }
         )
 

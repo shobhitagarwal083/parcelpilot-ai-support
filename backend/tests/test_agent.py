@@ -118,9 +118,7 @@ def test_argument_parsing_tolerates_what_models_emit(raw, expected):
 def test_the_system_prefix_is_byte_stable_across_personas():
     """What makes a cached prompt prefix possible if a provider supports one.
     Costs nothing now; retrofitting means unpicking the prompt builder."""
-    prefixes = {
-        prompts.system_messages(p)[0]["content"] for p in principals.PERSONAS.values()
-    }
+    prefixes = {prompts.system_messages(p)[0]["content"] for p in principals.PERSONAS.values()}
     assert len(prefixes) == 1
 
 
@@ -157,28 +155,102 @@ def test_customers_are_told_to_describe_behaviour_not_internal_ids():
 # ---------------------------------------------------------------- provider
 
 
-def test_the_payload_sends_a_fallback_array_in_one_request():
-    """A free-tier capacity failure should be invisible, not fatal."""
+def test_the_payload_is_vendor_neutral():
+    """One adapter reaches both providers, so the payload carries no vendor field.
+
+    Failover used to ride on OpenRouter's `models` array, which Google does not
+    accept -- the behaviour would have silently vanished on switching provider.
+    It lives in stream_completion now, so the payload stays plain.
+    """
     payload = provider.build_payload([{"role": "user", "content": "hi"}], REGISTRY.schemas())
 
-    assert payload["model"] == config.PRIMARY_MODEL
-    assert payload["models"] == [config.PRIMARY_MODEL, *config.FALLBACK_MODELS]
+    assert payload["model"] == config.primary_model()
+    assert "models" not in payload
     assert payload["max_tokens"] == config.MAX_TOKENS
     assert len(payload["tools"]) == len(EXPECTED_TOOLS)
 
 
-def test_pinning_one_model_disables_the_fallback_array():
+def test_pinning_a_model_overrides_the_configured_primary():
     """The bake-off needs each model measured on its own."""
-    payload = provider.build_payload([], [], model="z-ai/glm-5.2:free")
+    payload = provider.build_payload([], [], model="some-other-model")
 
-    assert payload["model"] == "z-ai/glm-5.2:free"
-    assert "models" not in payload
+    assert payload["model"] == "some-other-model"
 
 
-def test_a_missing_key_names_what_still_works_without_one(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+def test_every_configured_provider_resolves():
+    for name in config.PROVIDERS:
+        assert config.provider_base_url(name).startswith("https://")
+        assert config.provider_models(name), f"{name} lists no models"
+
+
+def test_an_unknown_provider_fails_loudly():
+    """A typo in MODEL_PROVIDER must not quietly answer from the wrong vendor."""
+    with pytest.raises(ValueError, match="unknown MODEL_PROVIDER"):
+        config.provider_settings("gemeni")
+
+
+def test_a_missing_key_names_the_variable_and_what_still_works(monkeypatch):
+    monkeypatch.delenv(str(config.provider_settings()["key_env"]), raising=False)
     with pytest.raises(provider.MissingCredentials, match="policy engine"):
         provider._headers()
+
+
+@pytest.mark.asyncio
+async def test_failover_tries_the_next_model_when_the_first_will_not_serve(monkeypatch):
+    """Capacity failures are what this exists for; both providers hit them."""
+    attempted: list[str] = []
+
+    async def flaky(messages, tools, *, model, timeout):
+        attempted.append(model)
+        if model == config.provider_models()[0]:
+            raise provider.ProviderError("provider returned 429: rate limited")
+        yield provider.TextDelta("ok")
+        yield provider.Completed(finish_reason="stop", text="ok")
+
+    monkeypatch.setattr(provider, "_stream_once", flaky)
+
+    chunks = [c async for c in provider.stream_completion([], [])]
+
+    assert attempted == config.provider_models()
+    assert any(isinstance(c, provider.Completed) for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_failover_does_not_splice_two_answers_together(monkeypatch):
+    """Once the client has seen output, retrying elsewhere would join half of
+    one answer to half of another -- worse than surfacing the error."""
+
+    async def dies_mid_stream(messages, tools, *, model, timeout):
+        yield provider.TextDelta("the fee is ")
+        raise provider.ProviderError("provider returned 500: upstream died")
+
+    monkeypatch.setattr(provider, "_stream_once", dies_mid_stream)
+
+    seen = []
+    with pytest.raises(provider.ProviderError):
+        async for chunk in provider.stream_completion([], []):
+            seen.append(chunk)
+
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_model_never_fails_over(monkeypatch):
+    """Substituting a different model would invalidate the bake-off silently."""
+    attempted: list[str] = []
+
+    async def always_fails(messages, tools, *, model, timeout):
+        attempted.append(model)
+        raise provider.ProviderError("provider returned 429: rate limited")
+        yield  # pragma: no cover - unreachable, makes this a generator
+
+    monkeypatch.setattr(provider, "_stream_once", always_fails)
+
+    with pytest.raises(provider.ProviderError):
+        async for _ in provider.stream_completion([], [], model="pinned-model"):
+            pass
+
+    assert attempted == ["pinned-model"]
 
 
 def test_streamed_tool_call_fragments_reassemble():
@@ -236,8 +308,14 @@ async def test_a_tool_call_is_traced_before_its_result(monkeypatch, now):
     fake_provider(
         monkeypatch,
         [
-            ("Let me check.", [provider.ToolCall(id="c1", name="evaluate_cancellation",
-                                                 arguments='{"order_id": "ORD-1001"}')]),
+            (
+                "Let me check.",
+                [
+                    provider.ToolCall(
+                        id="c1", name="evaluate_cancellation", arguments='{"order_id": "ORD-1001"}'
+                    )
+                ],
+            ),
             ("No fee applies.", []),
         ],
     )
@@ -258,8 +336,14 @@ async def test_citations_are_derived_from_the_decision_not_the_prose(monkeypatch
     fake_provider(
         monkeypatch,
         [
-            ("", [provider.ToolCall(id="c1", name="evaluate_cancellation",
-                                    arguments='{"order_id": "ORD-1001"}')]),
+            (
+                "",
+                [
+                    provider.ToolCall(
+                        id="c1", name="evaluate_cancellation", arguments='{"order_id": "ORD-1001"}'
+                    )
+                ],
+            ),
             ("Cancellation is free.", []),
         ],
     )
@@ -277,8 +361,14 @@ async def test_the_decision_reaches_the_client_whole(monkeypatch, now):
     fake_provider(
         monkeypatch,
         [
-            ("", [provider.ToolCall(id="c1", name="evaluate_cancellation",
-                                    arguments='{"order_id": "ORD-1001"}')]),
+            (
+                "",
+                [
+                    provider.ToolCall(
+                        id="c1", name="evaluate_cancellation", arguments='{"order_id": "ORD-1001"}'
+                    )
+                ],
+            ),
             ("Done.", []),
         ],
     )
@@ -312,10 +402,17 @@ async def test_a_proposed_action_is_announced_as_unexecuted(monkeypatch, now):
     fake_provider(
         monkeypatch,
         [
-            ("", [provider.ToolCall(
-                id="c1", name="propose_action",
-                arguments='{"action_type": "create_escalation", "reason": "P1 breach", '
-                          '"account_id": "ACCT-001", "target_id": "TKT-501"}')]),
+            (
+                "",
+                [
+                    provider.ToolCall(
+                        id="c1",
+                        name="propose_action",
+                        arguments='{"action_type": "create_escalation", "reason": "P1 breach", '
+                        '"account_id": "ACCT-001", "target_id": "TKT-501"}',
+                    )
+                ],
+            ),
             ("I have prepared an escalation for your confirmation.", []),
         ],
     )
@@ -333,8 +430,14 @@ async def test_a_breach_emits_an_escalation_event(monkeypatch, now):
     fake_provider(
         monkeypatch,
         [
-            ("", [provider.ToolCall(id="c1", name="evaluate_sla",
-                                    arguments='{"ticket_id": "TKT-501"}')]),
+            (
+                "",
+                [
+                    provider.ToolCall(
+                        id="c1", name="evaluate_sla", arguments='{"ticket_id": "TKT-501"}'
+                    )
+                ],
+            ),
             ("This is overdue.", []),
         ],
     )
@@ -359,7 +462,7 @@ async def test_a_declined_turn_routes_to_a_human(monkeypatch, now):
 @pytest.mark.asyncio
 async def test_a_missing_key_is_reported_not_raised(monkeypatch, now):
     async def unconfigured(messages, tools, *, model=None, timeout=120.0):
-        raise provider.MissingCredentials("OPENROUTER_API_KEY is not set")
+        raise provider.MissingCredentials("GEMINI_API_KEY is not set")
         yield  # pragma: no cover
 
     monkeypatch.setattr(provider, "stream_completion", unconfigured)
@@ -373,6 +476,7 @@ async def test_a_missing_key_is_reported_not_raised(monkeypatch, now):
 async def test_a_runaway_loop_is_capped(monkeypatch, now):
     """A public URL in front of a model needs a ceiling that does not depend on
     the model behaving."""
+
     async def never_finishes(messages, tools, *, model=None, timeout=120.0):
         yield provider.Completed(
             finish_reason="tool_calls",

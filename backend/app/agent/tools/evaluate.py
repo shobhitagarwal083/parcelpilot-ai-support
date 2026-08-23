@@ -50,11 +50,16 @@ def evaluate_cancellation(
 @tool(
     name="evaluate_service_credit",
     description=(
-        "Decide whether a failed pickup earns a service credit and how much. Works on a real "
-        "order (pass order_id) or on a hypothetical (pass hours_past_window_end, carrier_fault "
-        "and customer_fault). The answer depends on the account, because a signed agreement "
-        "can replace both the delay threshold and the amount -- so if the account is not "
-        "obvious from the conversation, ask rather than assuming."
+        "Decide whether a failed pickup earns a service credit and how much. The answer "
+        "depends on the account, because a signed agreement can replace both the delay "
+        "threshold and the amount -- so if the account is not obvious from the conversation, "
+        "ask rather than assuming.\n"
+        "IF THE USER STATES THE DELAY THEMSELVES ('a pickup is three hours late'), pass their "
+        "stated figures as hours_past_window_end/carrier_fault/customer_fault and answer about "
+        "that. Do NOT look up one of their orders and answer about its delay instead: a real "
+        "order with a longer delay gives a different verdict, and reporting it as though it "
+        "answered their question is wrong even though every number in it is right. "
+        "Pass order_id only when the user asked about that specific order."
     ),
     parameters=_object(
         {

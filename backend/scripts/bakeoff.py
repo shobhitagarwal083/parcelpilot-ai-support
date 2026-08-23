@@ -25,7 +25,7 @@ from app import config
 from app.agent import loop
 from app.auth import principals
 
-CANDIDATES = [config.PRIMARY_MODEL, *config.FALLBACK_MODELS]
+CANDIDATES = config.provider_models()
 
 #: A free-tier pool being saturated says nothing about whether a model can hold a
 #: tool chain. Scoring it as a chain failure would decide the primary on who
@@ -107,7 +107,16 @@ class Run:
         return not self.unavailable
 
     def reached(self, tool_name: str) -> bool:
-        return tool_name in self.tools_called
+        """Reached the decision tool *and* survived to produce a turn.
+
+        Counting the tool_call event alone was wrong, and wrong in the most
+        misleading direction. A Gemini run that called evaluate_cancellation and
+        then died on the next request scored a full chain while producing no
+        answer at all -- the summary recommended a primary model on the strength
+        of six runs that had every one of them failed. A chain that does not
+        finish is not a completed chain.
+        """
+        return tool_name in self.tools_called and not self.failed
 
     def verdict(self, question: Question) -> str:
         """The right verdict wins even when the wrong number is also present.
@@ -127,8 +136,20 @@ class Run:
 
 
 async def supports_tool_calling(model: str) -> bool | None:
-    """The hard gate. Returns None if the check itself could not be made."""
-    url = f"{config.OPENROUTER_BASE_URL}/models"
+    """The hard gate. Returns None when the check itself could not be made.
+
+    Only OpenRouter publishes `supported_parameters`, so this can be answered
+    from the catalogue there and not on Google, whose model list describes
+    generation methods instead. Returning None rather than False is the
+    important part: "we could not check" and "this model cannot call tools" are
+    different claims, and collapsing them would exclude a working model on the
+    strength of a missing field. An unverifiable model proceeds to the run,
+    where a failure to call any tool shows up as a chain score of zero anyway.
+    """
+    if config.PROVIDER != "openrouter":
+        return None
+
+    url = f"{config.provider_base_url()}/models"
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url)
@@ -203,9 +224,11 @@ async def main() -> int:
     )
     args = parser.parse_args()
 
-    if not config.openrouter_api_key():
-        print("OPENROUTER_API_KEY is not set. Add it to .env and re-run.")
+    settings = config.provider_settings()
+    if not config.api_key():
+        print(f"{settings['key_env']} is not set. Add it to .env and re-run.")
         return 1
+    print(f"provider: {config.PROVIDER}\n")
 
     print("Hard gate -- native tool calling support\n")
     usable = []

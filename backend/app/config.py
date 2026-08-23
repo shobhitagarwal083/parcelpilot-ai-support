@@ -74,18 +74,54 @@ BUSINESS_MINUTES_PER_DAY = (BUSINESS_END_HOUR - BUSINESS_START_HOUR) * 60  # 540
 
 # ---------------------------------------------------------------- model provider
 
-# D-14: OpenRouter free tier, sent as a model-fallback array in one request so
-# that free-tier capacity failures fail over rather than failing the demo.
+# D-19: Google AI Studio (Gemini), via its OpenAI-compatible endpoint.
 # Nothing outside app/agent/provider.py may import a vendor client.
 #
-# Ordering set by the phase 05a bake-off, not by published throughput figures.
-# D-14 provisionally led with GLM on its 147 t/s; measurement reversed it.
-# Nemotron completed the tool chain 10/10 while GLM was never served at all
-# (`scripts/bakeoff.py`, 2026-08-23). GLM stays in the array because a fallback
-# that is merely unavailable today costs nothing and may recover tomorrow.
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-PRIMARY_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
-FALLBACK_MODELS = ["z-ai/glm-5.2:free"]
+# Two providers are described here rather than one, and that is deliberate.
+# D-14 argued the provider is swappable because the model never arbitrates
+# between sources and never computes a number -- the engine, calendar, rulebook
+# and access control contain no model call at all. Keeping both configured turns
+# that from a claim into something demonstrable: run the same question through
+# each and watch ₹0 and ₹300 come out byte-identical, because neither model
+# produced them.
+#
+# Both speak the OpenAI chat-completions shape, so one adapter reaches both.
+
+PROVIDERS: dict[str, dict[str, object]] = {
+    "google": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "key_env": "GEMINI_API_KEY",
+        # Free-tier flash models only, and every one verified to actually emit a
+        # tool call before being listed. Two exclusions worth recording:
+        #
+        #   gemini-2.5-flash      answered in prose 0/4 times when handed a tool
+        #                         and told to use it. It fails D-14's hard gate,
+        #                         so it cannot drive this agent at any quality.
+        #   gemini-3-flash-preview  called the tool 2/4 -- too loose for a chain
+        #                         that has to hold across five or six calls.
+        #
+        # Pro models are excluded by policy, not measurement: they are not free
+        # tier. `*-latest` aliases are excluded too -- they drift, and a reviewer
+        # running this repo weeks from now should get the model we tested.
+        #
+        # Ordered. Unlike OpenRouter, Google has no server-side fallback array,
+        # so provider.py walks this list itself.
+        "models": ["gemini-3.5-flash", "gemini-3.1-flash-lite"],
+        "console": "https://aistudio.google.com/apikey",
+    },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "key_env": "OPENROUTER_API_KEY",
+        # Order set by the phase 05a bake-off, not by published throughput
+        # figures: nemotron completed the tool chain 10/10 while GLM was never
+        # served at all (`scripts/bakeoff.py`, 2026-08-23).
+        "models": ["nvidia/nemotron-3-nano-30b-a3b:free", "z-ai/glm-5.2:free"],
+        "console": "https://openrouter.ai/keys",
+    },
+}
+
+PROVIDER = os.environ.get("MODEL_PROVIDER", "google").strip().lower()
+
 MAX_TOKENS = 4096
 
 # Phase 10 cost ceiling — a public URL in front of an LLM endpoint needs one.
@@ -93,5 +129,37 @@ MAX_TURNS_PER_SESSION = 30
 MAX_TOOL_CALLS_PER_TURN = 12
 
 
-def openrouter_api_key() -> str | None:
-    return os.environ.get("OPENROUTER_API_KEY") or None
+def provider_settings(name: str | None = None) -> dict[str, object]:
+    """Resolve the active provider's settings, failing loudly on a typo.
+
+    A misspelled MODEL_PROVIDER should not silently fall back to a default --
+    that turns a five-second fix into a confusing debugging session about why
+    the wrong model is answering.
+    """
+    key = (name or PROVIDER).strip().lower()
+    if key not in PROVIDERS:
+        known = ", ".join(sorted(PROVIDERS))
+        raise ValueError(f"unknown MODEL_PROVIDER {key!r}; expected one of: {known}")
+    return PROVIDERS[key]
+
+
+def provider_base_url(name: str | None = None) -> str:
+    return str(provider_settings(name)["base_url"])
+
+
+def provider_models(name: str | None = None) -> list[str]:
+    return list(provider_settings(name)["models"])  # type: ignore[arg-type]
+
+
+def primary_model(name: str | None = None) -> str:
+    return provider_models(name)[0]
+
+
+def api_key(name: str | None = None) -> str | None:
+    """The active provider's key, read from the environment at call time.
+
+    Read on each call rather than captured at import, so a key added to .env
+    after the process starts is picked up by a reload rather than requiring a
+    restart -- and so tests can remove it.
+    """
+    return os.environ.get(str(provider_settings(name)["key_env"])) or None
