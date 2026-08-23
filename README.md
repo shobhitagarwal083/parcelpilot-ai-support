@@ -1,5 +1,8 @@
 # ParcelPilot AI Support
 
+**Live demo → [parcelpilot-support-jx92.onrender.com](https://parcelpilot-support-jx92.onrender.com)**
+*(free tier — if it has been idle it takes about a minute to wake)*
+
 An AI support system for a logistics company, built around one idea:
 
 > **The model routes and narrates. It never decides.**
