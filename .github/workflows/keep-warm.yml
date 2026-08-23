@@ -1,0 +1,49 @@
+name: Keep the demo warm
+
+# Render's free tier spins the service down after 15 minutes idle and takes
+# about a minute to wake. A reviewer following the README link should not spend
+# that minute wondering whether the app is broken, and a proposal left pending
+# while they read the answer should still be there when they click Confirm.
+#
+# Two limits shape the schedule, and neither of them is GitHub's -- this repo is
+# public, so Actions minutes are free:
+#
+#   * Render allows 750 instance-hours a month across the whole account. Awake
+#     around the clock is ~720 of them, leaving nothing for anything else and
+#     risking the service being suspended mid-review -- much worse than a slow
+#     first load. So this runs 02:00-17:59 UTC (07:30-23:30 IST): ~480 hours a
+#     month, covering the hours a human might plausibly open the link.
+#   * GitHub runs scheduled workflows on a best-effort queue, so a */10 cron
+#     fires late often enough to notice, and the schedule is disabled entirely
+#     after 60 days without repo activity. Warm most of the time is the goal.
+#     Guaranteed warm is not on offer, which is why the UI also explains a
+#     vanished pending action rather than relying on this.
+#
+# /api/health is deliberately not a metered path (see api/limits.py), so the
+# ping spends no model quota.
+
+on:
+  schedule:
+    - cron: "*/10 2-17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake the demo
+        # A cold start is ~60s, so the timeout is generous and the retries cover
+        # arriving while the container is still coming up. -f turns an HTTP
+        # error into a failed step rather than a green run reporting success
+        # over a demo that is down.
+        run: |
+          curl -fsS --max-time 120 --retry 3 --retry-delay 20 --retry-all-errors \
+            https://parcelpilot-support-jx92.onrender.com/api/health
