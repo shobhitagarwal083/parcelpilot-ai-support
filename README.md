@@ -44,31 +44,60 @@ Twelve such conflicts are catalogued and each is pinned by a test.
 
 ## Quick start
 
-**Requirements:** Python 3.11+, Node 18+, and a free
-[Google AI Studio key](https://aistudio.google.com/apikey).
+Two ways to run it. Docker needs nothing installed but Docker; the source path
+is for reading and changing the code. Either way you supply your own key — a
+free one from [Google AI Studio](https://aistudio.google.com/apikey) is enough.
+
+### With Docker
 
 ```bash
-git clone <repo-url> && cd calquity
+git clone https://github.com/shobhitagarwal083/parcelpilot-ai-support.git && cd parcelpilot-ai-support
 ```
 
 ```bash
-cp .env.example .env    # then add GEMINI_API_KEY
+docker build -t parcelpilot .
 ```
 
 ```bash
-cd backend && python -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
+docker run -p 8080:8080 -e GEMINI_API_KEY=your-key-here parcelpilot
 ```
 
-Build the search index and database from the source workbook and PDFs:
+Open <http://localhost:8080>. One container serves both the API and the
+interface. The search index and the database are built into the image, so there
+is no ingest step to remember and no six-PDF parse on the first request.
+
+### From source
+
+**Requirements:** Python 3.11+ and Node 18+. Every command below runs from the
+repo root, and nothing depends on which directory you are in — paths resolve
+from the package, not the shell.
 
 ```bash
-cd backend && ./.venv/bin/python -m app.ingest
+git clone https://github.com/shobhitagarwal083/parcelpilot-ai-support.git && cd parcelpilot-ai-support
+```
+
+```bash
+cp .env.example .env
+```
+
+Put your key in `GEMINI_API_KEY` and leave the rest. `MODEL_PROVIDER` defaults
+to `google`; `groq` and `openrouter` work identically with their own keys, and
+any key you set also joins the failover chain.
+
+```bash
+python3 -m venv backend/.venv && backend/.venv/bin/pip install -e "./backend[dev]"
+```
+
+Build the search index and the database from the source workbook and PDFs:
+
+```bash
+backend/.venv/bin/python -m app.ingest
 ```
 
 Run the API:
 
 ```bash
-cd backend && ./.venv/bin/python -m uvicorn app.api.main:app --port 8000
+backend/.venv/bin/python -m uvicorn app.api.main:app --port 8000
 ```
 
 Run the interface, in a second terminal:
@@ -77,15 +106,23 @@ Run the interface, in a second terminal:
 cd frontend && npm install && npm run dev
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5173>. The dev server proxies `/api` to port 8000, so
+start the API first.
+
+### It runs without a key, too
+
+The key buys narration, not correctness. The rule engine, retrieval, access
+control and the triage board contain no model call at all, so the board, every
+record view and the entire test suite work with `GEMINI_API_KEY` empty. Only the
+chat answers need a provider — and when one is missing or rate-limited, the
+interface says so plainly instead of failing as a broken app.
 
 ### Tests
 
-224 tests, no API key required — the rule engine, retrieval and access control
-contain no model call at all.
+224 tests, no API key required.
 
 ```bash
-cd backend && ./.venv/bin/python -m pytest
+backend/.venv/bin/python -m pytest backend/tests
 ```
 
 ---
@@ -196,13 +233,11 @@ happen*, and every hop between browser and process is somewhere an SSE stream
 can be buffered — which does not error, it just quietly turns a live trace into
 one delayed dump.
 
-```bash
-docker build -t parcelpilot . && docker run -p 8080:8080 -e GEMINI_API_KEY=... parcelpilot
-```
-
-Ingest runs at image build time, so a cold start serves immediately rather than
-parsing six PDFs first, and a malformed source pack fails the build instead of
-the first request. `PORT` is read at runtime for hosts that inject one.
+The build and run commands are in [Quick start](#with-docker). Ingest runs at
+image build time, so a cold start serves immediately rather than parsing six
+PDFs first, and a malformed source pack fails the build instead of the first
+request. `PORT` is read at runtime for hosts that inject one, which is why the
+same image runs unchanged locally and on Render.
 
 [`render.yaml`](render.yaml) and [`fly.toml`](fly.toml) are both committed. Fly
 was the original choice for its warm machines, and its free trial turned out to
@@ -210,6 +245,53 @@ be two machine-hours or seven days — a link that expires before it is reviewed
 is worse than a slow one. Render's free tier needs no card and renews monthly,
 at the cost of spinning down after 15 minutes idle and taking about a minute to
 wake.
+
+## With more time
+
+Four pieces of structural work, in the order I would build them. The
+[product note](docs/product.md) ranks the smaller product bets; this is the
+scaffolding that a real deployment needs and a take-home does not.
+
+**Real authentication, for customers and internal staff.** Auth is mocked here,
+as the brief permits — the client names a persona and the server resolves it.
+What is *not* mocked is everything underneath: the principal is injected
+server-side, every repository entry point takes it first, and a test asserts no
+code path reaches data without one. So the work is to mint that principal from a
+verified identity instead of a header — SSO for staff, an account-bound login for
+customers, capabilities from a directory rather than a Python dict. Nothing below
+the auth layer changes, and that is precisely the payoff of putting enforcement
+in the data layer rather than in the prompt.
+
+**A live database once this scales.** SQLite baked into the image is the right
+call for a demo that has to reproduce exactly, and the wrong one for anything
+with real traffic: the filesystem is ephemeral, so a restart takes pending
+actions with it. Managed Postgres, migrations, a connection pool, and — the part
+that matters — `pending_actions` and `audit_log` that survive a restart. The
+audit log stops being a demo artefact at that point and becomes the record that a
+named human approved a specific credit at a known time, which is the thing an
+auditor actually asks for.
+
+**Policy that loads itself, with a human in the loop.** Today a new agreement
+means someone writes YAML by hand, which means the system decays the moment
+policy moves faster than engineering. The shape I would build: drop the PDF in,
+extract candidate rules *with their citations*, diff them against the current
+rulebook, show which past decisions would flip, and require a person to accept or
+reject each one before a single line is written. The model proposes, a human
+approves, and the engine still decides at answer time — the same two-phase gate
+the actions use, applied to the rules themselves. Authority stays data, and the
+provenance every citation depends on stays intact.
+
+**An internal console that can override.** The triage board is the seed of this:
+it ranks what the detectors find, shows the evidence and reasoning behind each,
+and routes anything above SOP v4's ₹1,000 threshold to a manager. What it cannot
+do is disagree. I would add a path where a manager overrides a decision, records
+why, and commits a change that mutates the live record — through the same audited
+gate, never directly, so that "the model cannot execute anything" survives
+contact with people who can. Those overrides are also the most valuable telemetry
+here: each one marks a place where the rulebook and the business disagree, which
+is exactly the input the rule-authoring flow above needs to be worth having.
+
+---
 
 ## Notes for reviewers
 
