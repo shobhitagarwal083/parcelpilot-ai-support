@@ -44,10 +44,17 @@ _hits: dict[str, deque[float]] = defaultdict(deque)
 def client_key(request: Request) -> str:
     """Identify the caller.
 
-    Behind Fly.io the peer address is the proxy, so the forwarded header is the
-    real client. It is spoofable by a determined caller, which is acceptable
-    here: this is a courtesy limit protecting a free-tier allowance, not an
-    authentication boundary. Treating it as the latter would be the mistake.
+    Behind any platform proxy the peer address is the proxy itself, so without
+    this every visitor shares one bucket and the first busy one locks out
+    everybody. Render forwards `x-forwarded-for`; Fly also sets `fly-client-ip`,
+    which is preferred where present because it is a single address rather than
+    a chain. Both are handled so the deployment target can change without this
+    silently degrading to one global counter.
+
+    ⚠️ Spoofable by a determined caller, and that is acceptable: this is a
+    courtesy limit protecting a shared free-tier allowance, not an
+    authentication boundary. Treating a client-supplied header as the latter
+    would be the mistake.
     """
     forwarded = request.headers.get("fly-client-ip") or request.headers.get("x-forwarded-for")
     if forwarded:

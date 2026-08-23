@@ -1,0 +1,46 @@
+# Render deployment.
+#
+# Chosen over Fly for one reason: Fly's free trial is 2 machine-hours or 7 days,
+# whichever comes first, after which the app stops unless a card is added. A link
+# that expires before it is reviewed is worse than a slow one. Render's free tier
+# needs no card and renews 750 instance-hours a month.
+#
+# The cost is real and worth stating: a free service spins down after 15 minutes
+# idle and takes about a minute to wake, so a cold visitor waits. The demo video
+# opens on a loaded app for exactly this reason -- the video carries the first
+# impression and this link corroborates it.
+#
+# `fly.toml` is kept alongside this file. It works, it was tested, and switching
+# back is a one-line decision if a card ever becomes acceptable.
+
+services:
+  - type: web
+    name: parcelpilot-support
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: singapore # Nearest to IST, which is what the data is denominated in.
+
+    # Cheap, and it is the endpoint that distinguishes a misconfigured deploy
+    # from a healthy one: it reports the provider and whether a key is present,
+    # never the key itself.
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: MODEL_PROVIDER
+        value: google
+
+      # Set in the Render dashboard, never here and never in the image.
+      # `sync: false` is what makes Render prompt for it rather than expecting
+      # a value in this file.
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # Optional. Configure either and it joins the failover chain, which
+      # crosses vendors because free quota is metered per project -- one vendor
+      # being exhausted does not exhaust another.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false

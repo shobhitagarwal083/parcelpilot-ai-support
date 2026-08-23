@@ -55,10 +55,18 @@ USER app
 
 EXPOSE 8080
 
+# The port is read at runtime, not baked in. Render injects $PORT and expects
+# the process to bind it; 8080 is the fallback so `docker run -p 8080:8080`
+# still works locally and on any host that does not inject one.
+ENV PORT=8080
+
 # One worker, deliberately. The rate limiter holds its counters in process and a
 # second worker would silently double every limit; SQLite's single writer makes
 # multiple workers a bad idea here regardless. Scaling past this means Postgres
 # and a shared limiter store, not more workers.
-CMD ["python", "-m", "uvicorn", "app.api.main:app", \
-     "--app-dir", "backend", "--host", "0.0.0.0", "--port", "8080", \
-     "--workers", "1", "--timeout-keep-alive", "75"]
+#
+# `sh -c` so $PORT is expanded -- the plain exec form would pass the literal
+# string. `exec` then replaces the shell with uvicorn, which matters more than
+# it looks: without it the shell stays PID 1 and swallows SIGTERM, so a deploy
+# or scale-down would hard-kill the process mid-stream instead of draining it.
+CMD ["sh", "-c", "exec python -m uvicorn app.api.main:app --app-dir backend --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 75"]

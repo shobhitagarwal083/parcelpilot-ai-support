@@ -183,7 +183,35 @@ different answer from "within target", and the tools distinguish them.
 
 ---
 
+## Deployment
+
+One container: the API serves the built frontend, so there is one origin, no
+CORS, and one deploy that cannot drift out of step with itself.
+
+The deciding reason is streaming. The interface shows tool calls *as they
+happen*, and every hop between browser and process is somewhere an SSE stream
+can be buffered — which does not error, it just quietly turns a live trace into
+one delayed dump.
+
+```bash
+docker build -t parcelpilot . && docker run -p 8080:8080 -e GEMINI_API_KEY=... parcelpilot
+```
+
+Ingest runs at image build time, so a cold start serves immediately rather than
+parsing six PDFs first, and a malformed source pack fails the build instead of
+the first request. `PORT` is read at runtime for hosts that inject one.
+
+[`render.yaml`](render.yaml) and [`fly.toml`](fly.toml) are both committed. Fly
+was the original choice for its warm machines, and its free trial turned out to
+be two machine-hours or seven days — a link that expires before it is reviewed
+is worse than a slow one. Render's free tier needs no card and renews monthly,
+at the cost of spinning down after 15 minutes idle and taking about a minute to
+wake.
+
 ## Notes for reviewers
+
+**The hosted link may take up to a minute to wake.** It runs on a free tier that
+spins down when idle. The demo video opens on a loaded app for that reason.
 
 **The demo runs on a free-tier model and may rate-limit.** If it does, the
 interface says so plainly rather than failing silently. The decisions themselves
