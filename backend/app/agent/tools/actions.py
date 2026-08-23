@@ -21,8 +21,17 @@ from app.repo import actions
     name="propose_action",
     description=(
         "Prepare a state-changing action for a human to confirm. This does NOT execute "
-        "anything: it creates a pending proposal that a person must explicitly approve. "
-        "Types: create_escalation, update_ticket, create_followup_task, issue_service_credit. "
+        "anything: it creates a pending proposal that a person must explicitly approve.\n"
+        "  create_escalation     - route to a human colleague\n"
+        "  update_ticket         - change a TICKET's status. target_id must be a ticket "
+        "(TKT-xxx); an order id will be rejected\n"
+        "  create_followup_task  - record work for someone to pick up\n"
+        "  issue_service_credit  - credit an account, using the amount an evaluate tool "
+        "returned\n"
+        "THERE IS NO ACTION THAT CANCELS, MODIFIES OR RELEASES AN ORDER. If someone asks you "
+        "to cancel one, explain whether a fee would apply, then raise a ticket or escalate so "
+        "a person can carry it out. Never say an order will be cancelled, and never reach for "
+        "update_ticket to do it -- that changes a ticket, not an order.\n"
         "Always tell the user what you have prepared and that it awaits their confirmation."
     ),
     parameters=_object(
@@ -34,7 +43,11 @@ from app.repo import actions
             "account_id": {"type": "string", "description": "Whose account this affects."},
             "target_id": {
                 "type": "string",
-                "description": "The order or ticket the action applies to, if any.",
+                "description": (
+                    "What the action applies to. For update_ticket this must be a ticket id "
+                    "(TKT-xxx) -- passing an order id fails, because it updates the tickets "
+                    "table."
+                ),
             },
             "reason": {"type": "string", "description": "Why this action is warranted."},
             "amount_inr": {
